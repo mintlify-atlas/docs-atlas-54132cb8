@@ -1,0 +1,100 @@
+{
+  "projectType": "api-service",
+  "projectName": "LLM Gateway Core",
+  "projectDescription": "Production-grade LLM gateway that abstracts multiple model providers with intelligent routing, caching, retries, and observability.",
+  "theme": "aspen",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "architecture",
+              "routing",
+              "caching",
+              "rate-limiting"
+            ]
+          },
+          {
+            "group": "Providers",
+            "pages": [
+              "providers/overview",
+              "providers/gemini",
+              "providers/ollama",
+              "providers/custom"
+            ]
+          },
+          {
+            "group": "Observability",
+            "pages": [
+              "monitoring/overview",
+              "monitoring/metrics",
+              "monitoring/grafana"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/configuration",
+              "deployment/environment-variables"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/chat",
+              "api/health",
+              "api/metrics"
+            ]
+          },
+          {
+            "group": "Schemas",
+            "pages": [
+              "api/schemas/chat-request",
+              "api/schemas/chat-response",
+              "api/schemas/errors"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-provider abstraction (Gemini, Ollama)",
+    "Intelligent routing with model hints",
+    "Distributed Redis caching",
+    "Token bucket rate limiting",
+    "Automatic retries with timeout handling",
+    "Prometheus metrics & Grafana dashboards",
+    "Production-ready observability"
+  ],
+  "publicApiSurface": [
+    "POST /api/v1/chat - Chat completion endpoint",
+    "GET /api/v1/health - Health check endpoint",
+    "GET /api/v1/metrics - Prometheus metrics endpoint",
+    "ChatRequest schema (messages, model_hint, max_tokens, temperature)",
+    "ChatResponse schema (id, provider, content, usage)",
+    "Router.route() - Provider routing logic",
+    "RedisCache - Distributed caching layer",
+    "RedisRateLimiter - Token bucket rate limiting"
+  ]
+}
