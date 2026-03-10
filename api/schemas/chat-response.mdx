@@ -14,7 +14,7 @@ The `ChatResponse` schema defines the structure of successful chat completion re
 </ResponseField>
 
 <ResponseField name="provider" type="string" required>
-  The LLM provider that fulfilled the request (e.g., `"openai"`, `"anthropic"`, `"cohere"`).
+  The LLM provider that fulfilled the request (e.g., `"gemini"`, `"ollama"`).
 </ResponseField>
 
 <ResponseField name="content" type="string" required>
@@ -45,41 +45,39 @@ The `ChatResponse` schema defines the structure of successful chat completion re
 
 ```json JSON
 {
-  "id": "chatcmpl-8f7d9e2a1b3c4d5e",
-  "provider": "openai",
+  "id": "8f7d9e2a-1b3c-4d5e-abc1-23456789",
+  "provider": "gemini",
   "content": "The capital of France is Paris. It is located in the north-central part of the country.",
   "usage": {
-    "prompt_tokens": 15,
-    "completion_tokens": 22,
-    "total_tokens": 37
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
   }
 }
 ```
 
 ```python Python
-from llm_gateway import ChatResponse, Usage
-
-response = ChatResponse(
-    id="chatcmpl-8f7d9e2a1b3c4d5e",
-    provider="openai",
-    content="The capital of France is Paris. It is located in the north-central part of the country.",
-    usage=Usage(
-        prompt_tokens=15,
-        completion_tokens=22,
-        total_tokens=37
-    )
-)
+response = {
+    "id": "8f7d9e2a-1b3c-4d5e-abc1-23456789",
+    "provider": "gemini",
+    "content": "The capital of France is Paris. It is located in the north-central part of the country.",
+    "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+    }
+}
 ```
 
 ```javascript JavaScript
 const response = {
-  id: "chatcmpl-8f7d9e2a1b3c4d5e",
-  provider: "openai",
+  id: "8f7d9e2a-1b3c-4d5e-abc1-23456789",
+  provider: "gemini",
   content: "The capital of France is Paris. It is located in the north-central part of the country.",
   usage: {
-    prompt_tokens: 15,
-    completion_tokens: 22,
-    total_tokens: 37
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0
   }
 };
 ```
@@ -92,37 +90,24 @@ The `provider` field indicates which LLM backend processed your request:
 
 <CodeGroup>
 
-```json OpenAI
+```json Gemini
 {
-  "id": "chatcmpl-abc123",
-  "provider": "openai",
-  "content": "Response from OpenAI GPT model",
+  "id": "abc123-def456",
+  "provider": "gemini",
+  "content": "Response from Google Gemini model",
   "usage": {
-    "prompt_tokens": 10,
-    "completion_tokens": 15,
-    "total_tokens": 25
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
   }
 }
 ```
 
-```json Anthropic
+```json Ollama
 {
   "id": "msg-def456",
-  "provider": "anthropic",
-  "content": "Response from Anthropic Claude model",
-  "usage": {
-    "prompt_tokens": 10,
-    "completion_tokens": 15,
-    "total_tokens": 25
-  }
-}
-```
-
-```json Cohere
-{
-  "id": "gen-ghi789",
-  "provider": "cohere",
-  "content": "Response from Cohere model",
+  "provider": "ollama",
+  "content": "Response from local Ollama model",
   "usage": {
     "prompt_tokens": 10,
     "completion_tokens": 15,

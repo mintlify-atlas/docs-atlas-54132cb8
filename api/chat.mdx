@@ -64,7 +64,7 @@ This endpoint is rate-limited using a token bucket algorithm backed by Redis. Ra
 </ResponseField>
 
 <ResponseField name="provider" type="string" required>
-  The LLM provider that handled this request (e.g., "openai", "anthropic").
+  The LLM provider that handled this request (e.g., "gemini", "ollama").
 </ResponseField>
 
 <ResponseField name="content" type="string" required>
@@ -92,7 +92,7 @@ This endpoint is rate-limited using a token bucket algorithm backed by Redis. Ra
 ## Example Request
 
 ```bash
-curl -X POST https://api.example.com/api/v1/chat \
+curl -X POST http://localhost:8000/api/v1/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_api_key_here" \
   -d '{
@@ -102,7 +102,7 @@ curl -X POST https://api.example.com/api/v1/chat \
         "content": "What is the capital of France?"
       }
     ],
-    "model": "gpt-4",
+    "model_hint": "online",
     "max_tokens": 512,
     "temperature": 0.7
   }'
@@ -112,13 +112,13 @@ curl -X POST https://api.example.com/api/v1/chat \
 
 ```json
 {
-  "id": "chatcmpl-abc123def456",
-  "provider": "openai",
+  "id": "abc123-def456-789",
+  "provider": "gemini",
   "content": "The capital of France is Paris. It is located in the north-central part of the country and is known for its rich history, culture, and iconic landmarks like the Eiffel Tower.",
   "usage": {
-    "prompt_tokens": 15,
-    "completion_tokens": 38,
-    "total_tokens": 53
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
   }
 }
 ```

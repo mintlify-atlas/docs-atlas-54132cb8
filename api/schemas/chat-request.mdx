@@ -55,7 +55,7 @@ The `ChatRequest` schema defines the structure for sending chat completion reque
       "content": "What is the capital of France?"
     }
   ],
-  "model": "gpt-4",
+  "model_hint": "online",
   "max_tokens": 512,
   "temperature": 0.7,
   "stream": false
@@ -63,17 +63,17 @@ The `ChatRequest` schema defines the structure for sending chat completion reque
 ```
 
 ```python Python
-from llm_gateway import ChatRequest, Message
+import requests
 
-request = ChatRequest(
-    messages=[
-        Message(role="user", content="What is the capital of France?")
+request = {
+    "messages": [
+        {"role": "user", "content": "What is the capital of France?"}
     ],
-    model="gpt-4",
-    max_tokens=512,
-    temperature=0.7,
-    stream=False
-)
+    "model_hint": "online",
+    "max_tokens": 512,
+    "temperature": 0.7,
+    "stream": False
+}
 ```
 
 ```javascript JavaScript
@@ -84,7 +84,7 @@ const request = {
       content: "What is the capital of France?"
     }
   ],
-  model: "gpt-4",
+  model_hint: "online",
   max_tokens: 512,
   temperature: 0.7,
   stream: false
@@ -113,21 +113,21 @@ const request = {
       "content": "What is its population?"
     }
   ],
-  "model": "gpt-4",
+  "model_hint": "fast",
   "temperature": 0.7
 }
 ```
 
 ```python Python
-request = ChatRequest(
-    messages=[
-        Message(role="user", content="What is the capital of France?"),
-        Message(role="assistant", content="The capital of France is Paris."),
-        Message(role="user", content="What is its population?")
+request = {
+    "messages": [
+        {"role": "user", "content": "What is the capital of France?"},
+        {"role": "assistant", "content": "The capital of France is Paris."},
+        {"role": "user", "content": "What is its population?"}
     ],
-    model="gpt-4",
-    temperature=0.7
-)
+    "model_hint": "fast",
+    "temperature": 0.7
+}
 ```
 
 </CodeGroup>
