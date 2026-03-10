@@ -1,0 +1,156 @@
+---
+title: "Chat Completions"
+api: "POST /api/v1/chat"
+description: "Process chat completion requests through the LLM gateway"
+---
+
+The Chat endpoint is the primary interface for processing LLM chat completions. It accepts messages and model configurations, routes requests to the appropriate provider, and returns standardized responses.
+
+## Authentication
+
+This endpoint requires authentication via the `X-API-Key` header.
+
+<ParamField header="X-API-Key" type="string" required>
+  Your API key for authentication. Requests without a valid API key will receive a 401 error.
+</ParamField>
+
+## Rate Limiting
+
+This endpoint is rate-limited using a token bucket algorithm backed by Redis. Rate limits are enforced per API key. When the rate limit is exceeded, the endpoint returns a 429 status code.
+
+- **Capacity**: Configurable via `RATE_LIMITER_CAPACITY`
+- **Refill Rate**: Configurable via `RATE_LIMITER_REFILL_RATE`
+
+## Request Body
+
+<ParamField body="messages" type="array" required>
+  An array of message objects representing the conversation history.
+  
+  <Expandable title="Message Object">
+    <ParamField body="role" type="string" required>
+      The role of the message sender. Typical values: `"user"`, `"assistant"`, `"system"`
+    </ParamField>
+    
+    <ParamField body="content" type="string" required>
+      The content of the message.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="model" type="string" optional>
+  The specific model identifier to use for the completion. If not provided, the gateway will select an appropriate model.
+</ParamField>
+
+<ParamField body="model_hint" type="string" optional>
+  A hint to help the gateway select an appropriate model or provider.
+</ParamField>
+
+<ParamField body="max_tokens" type="integer" optional default="512">
+  The maximum number of tokens to generate in the completion.
+</ParamField>
+
+<ParamField body="temperature" type="number" optional default="0.7">
+  Controls randomness in the output. Higher values (e.g., 1.0) make output more random, lower values (e.g., 0.2) make it more deterministic.
+</ParamField>
+
+<ParamField body="stream" type="boolean" optional default="false">
+  Whether to stream the response. Currently defaults to false.
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="string" required>
+  A unique identifier for this completion request.
+</ResponseField>
+
+<ResponseField name="provider" type="string" required>
+  The LLM provider that handled this request (e.g., "openai", "anthropic").
+</ResponseField>
+
+<ResponseField name="content" type="string" required>
+  The generated completion text from the model.
+</ResponseField>
+
+<ResponseField name="usage" type="object" required>
+  Token usage statistics for this request.
+  
+  <Expandable title="Usage Object">
+    <ResponseField name="prompt_tokens" type="integer" required>
+      Number of tokens in the prompt.
+    </ResponseField>
+    
+    <ResponseField name="completion_tokens" type="integer" required>
+      Number of tokens in the generated completion.
+    </ResponseField>
+    
+    <ResponseField name="total_tokens" type="integer" required>
+      Total number of tokens used (prompt + completion).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example Request
+
+```bash
+curl -X POST https://api.example.com/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your_api_key_here" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is the capital of France?"
+      }
+    ],
+    "model": "gpt-4",
+    "max_tokens": 512,
+    "temperature": 0.7
+  }'
+```
+
+## Example Response
+
+```json
+{
+  "id": "chatcmpl-abc123def456",
+  "provider": "openai",
+  "content": "The capital of France is Paris. It is located in the north-central part of the country and is known for its rich history, culture, and iconic landmarks like the Eiffel Tower.",
+  "usage": {
+    "prompt_tokens": 15,
+    "completion_tokens": 38,
+    "total_tokens": 53
+  }
+}
+```
+
+## Error Responses
+
+<ResponseExample>
+```json 401 Unauthorized
+{
+  "detail": "Invalid or missing API Key"
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json 429 Rate Limit Exceeded
+{
+  "detail": "Too many requests. Please wait before trying again."
+}
+```
+</ResponseExample>
+
+<ResponseExample>
+```json 422 Validation Error
+{
+  "detail": [
+    {
+      "loc": ["body", "messages"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    }
+  ]
+}
+```
+</ResponseExample>

@@ -1,0 +1,154 @@
+---
+title: Introduction
+description: Learn about LLM Gateway Core, a production-grade infrastructure component for unified LLM provider access
+---
+
+## What is LLM Gateway Core?
+
+LLM Gateway Core is a production-grade infrastructure component designed to abstract multiple Large Language Model (LLM) providers behind a single, unified API. It provides reliable and cost-effective LLM access through intelligent routing, distributed caching, atomic rate limiting, and comprehensive observability.
+
+<CardGroup cols={2}>
+  <Card title="Unified API" icon="plug">
+    Single endpoint for multiple LLM providers - switch between Google Gemini and Ollama without changing your code
+  </Card>
+  <Card title="Intelligent Routing" icon="route">
+    Dynamic provider selection based on request hints: online, local, fast, or secure modes
+  </Card>
+  <Card title="Distributed Cache" icon="database">
+    Redis-backed response caching reduces latency and API costs
+  </Card>
+  <Card title="Rate Limiting" icon="gauge">
+    Token bucket algorithm via Redis Lua scripts for atomic, distributed request throttling
+  </Card>
+</CardGroup>
+
+## Why Use LLM Gateway Core?
+
+### Cost Optimization
+
+Reduce LLM API costs through intelligent caching. Repeated queries are served from Redis instead of making expensive provider calls.
+
+### Provider Flexibility
+
+Avoid vendor lock-in by abstracting provider-specific APIs. Switch between cloud and local models based on your needs:
+
+- **Google Gemini** for high-performance cloud inference
+- **Ollama** for private, on-premise deployments
+
+### Production-Ready Reliability
+
+<Note>
+  The gateway implements distributed rate limiting to protect your infrastructure from request spikes and ensures fair resource allocation across clients.
+</Note>
+
+Built-in rate limiting prevents abuse and ensures system stability. Clients exceeding configured thresholds receive standard HTTP 429 responses.
+
+### Full Observability
+
+Comprehensive monitoring through Prometheus and Grafana provides visibility into:
+
+- Request rates and latency by provider
+- Cache hit rates and performance
+- Rate limiting metrics
+- System health indicators
+
+## Key Capabilities
+
+### System Architecture
+
+The gateway is built on a high-performance FastAPI backend with a provider-agnostic interface:
+
+```python
+from fastapi import FastAPI
+from app.api.v1 import chat, health, metrics
+
+app = FastAPI(title="LLM Gateway Core")
+app.include_router(chat.app, prefix="/api/v1")
+app.include_router(health.app, prefix="/api/v1")
+app.include_router(metrics.app, prefix="/api/v1")
+```
+
+### Core Components
+
+**API Layer**
+FastAPI-based REST API providing standardized chat completion endpoints at `/api/v1/chat`.
+
+**Provider Router**
+Dynamically selects the optimal model provider based on request hints:
+- `online`, `fast` → Google Gemini
+- `local`, `secure` → Ollama
+
+**Redis Integration**
+- **Distributed Cache**: Persistently stores provider responses with configurable TTL
+- **Rate Limiter**: Atomic token bucket implementation for fair request throttling
+
+**Monitoring Stack**
+Full observability with Prometheus for metrics collection and Grafana for visualization.
+
+**Streamlit Frontend**
+Clean, responsive interface for demonstration and testing purposes.
+
+## Integrated Providers
+
+<CodeGroup>
+
+```python Google Gemini
+from app.providers.gemini import GeminiProvider
+
+# High-performance cloud integration
+# Used for 'online' and 'fast' request modes
+provider = GeminiProvider()
+```
+
+```python Ollama
+from app.providers.ollama import OllamaProvider
+
+# Local integration for private inference
+# Used for 'local' and 'secure' request modes
+provider = OllamaProvider()
+```
+
+</CodeGroup>
+
+## Request Flow
+
+<Steps>
+  <Step title="Client Authentication">
+    Client sends request with `X-API-Key` header. Gateway validates against configured API keys.
+  </Step>
+  
+  <Step title="Rate Limiting Check">
+    Redis-backed rate limiter enforces per-client quotas using token bucket algorithm.
+  </Step>
+  
+  <Step title="Cache Lookup">
+    Gateway checks Redis cache for identical request. Cache hits return immediately.
+  </Step>
+  
+  <Step title="Provider Routing">
+    Router selects provider based on `model_hint` (online, local, fast, secure).
+  </Step>
+  
+  <Step title="LLM Inference">
+    Provider executes request with retry logic and timeout protection.
+  </Step>
+  
+  <Step title="Response Caching">
+    Successful responses are cached in Redis with configurable TTL.
+  </Step>
+  
+  <Step title="Metrics Collection">
+    Prometheus metrics updated for observability and monitoring.
+  </Step>
+</Steps>
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup and configuration
+  </Card>
+</CardGroup>

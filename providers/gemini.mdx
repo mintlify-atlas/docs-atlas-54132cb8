@@ -1,0 +1,283 @@
+---
+title: 'Gemini Provider'
+description: 'Google Gemini API integration for cloud-based LLM inference'
+---
+
+## Overview
+
+The **Gemini Provider** integrates Google's Gemini API into LLM Gateway Core, providing access to state-of-the-art language models hosted on Google's infrastructure.
+
+### Features
+
+- **Model:** `gemini-2.5-flash` - Fast, efficient conversational AI
+- **Async Support:** Full async/await pattern for high concurrency
+- **Conversation History:** Maintains multi-turn chat context
+- **Error Handling:** Comprehensive exception handling with detailed logging
+
+## Configuration
+
+### Environment Variables
+
+The Gemini provider requires an API key from Google AI Studio.
+
+<Steps>
+  <Step title="Get API Key">
+    Visit [Google AI Studio](https://makersuite.google.com/app/apikey) and create an API key
+  </Step>
+  
+  <Step title="Add to .env">
+    Add your API key to the `.env` file:
+    
+    ```bash .env
+    GEMINI_API_KEY=your-api-key-here
+    ```
+  </Step>
+  
+  <Step title="Restart Gateway">
+    Restart the gateway service to load the new configuration:
+    
+    ```bash
+    uvicorn app.main:app --reload
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Never commit your API key to version control. Always use environment variables or secret management services.
+</Warning>
+
+### Configuration Settings
+
+```python app/core/config.py
+class Settings(BaseSettings):
+    GEMINI_API_KEY: str = ""  # Required for Gemini provider
+    PROVIDER_TIMEOUT_SECONDS: int = 60
+    PROVIDER_MAX_RETRIES: int = 3
+```
+
+## Implementation
+
+### Source Code
+
+Here's the complete implementation of the Gemini provider:
+
+```python app/providers/gemini.py
+import google.generativeai as genai
+from app.providers.base import LLMProvider
+from app.api.v1.schemas import ChatRequest, ChatResponse, Usage
+from app.core.config import settings
+import uuid
+
+class GeminiProvider(LLMProvider):
+    def __init__(self):
+        # Configuration is deferred to chat() to ensure latest .env values
+        pass
+
+    @property
+    def name(self) -> str:
+        return "gemini"
+    
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        """
+        Real Gemini API call.
+        """
+        try:
+            # Configure API key
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            model = genai.GenerativeModel('gemini-2.5-flash')
+
+            # Build conversation history
+            history = []
+            for msg in request.messages[:-1]:
+                role = "user" if msg.role == "user" else "model"
+                history.append({
+                    "role": role, 
+                    "parts": [{"text": msg.content}]
+                })
+            
+            # Extract last message
+            last_message = request.messages[-1].content
+            
+            # Start chat session and send message
+            chat_session = model.start_chat(history=history)
+            response = await chat_session.send_message_async(last_message)
+            
+            # Return standardized response
+            return ChatResponse(
+                id=str(uuid.uuid4()),
+                provider=self.name,
+                content=response.text,
+                usage=Usage(
+                    prompt_tokens=0, 
+                    completion_tokens=0,
+                    total_tokens=0
+                )
+            )
+        except Exception as e:
+            import traceback
+            print(f"[Gemini Error Detailed]\n{traceback.format_exc()}")
+            raise
+```
+
+### Key Implementation Details
+
+<AccordionGroup>
+  <Accordion title="Message Format Conversion">
+    Gemini expects a specific message format:
+    
+    ```python
+    {
+        "role": "user" | "model",  # "model" instead of "assistant"
+        "parts": [{"text": "message content"}]
+    }
+    ```
+    
+    The provider converts standard `ChatRequest` messages to this format.
+  </Accordion>
+
+  <Accordion title="Conversation History">
+    - All messages except the last are passed as history to `start_chat()`
+    - The last message is sent via `send_message_async()`
+    - This maintains conversation context across turns
+  </Accordion>
+
+  <Accordion title="Async Configuration">
+    The API key is configured on each request (not in `__init__`) to ensure the latest environment variable values are used, supporting hot-reloading during development.
+  </Accordion>
+
+  <Accordion title="Usage Statistics">
+    Currently returns zeros for token counts. This can be enhanced by parsing Gemini's response metadata if token tracking is needed.
+  </Accordion>
+</AccordionGroup>
+
+## Usage
+
+### Routing to Gemini
+
+The gateway routes requests to Gemini when:
+
+<Tabs>
+  <Tab title="Explicit Model">
+    ```json
+    {
+      "model": "gemini",
+      "messages": [...]
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Model Hint">
+    ```json
+    {
+      "model_hint": "online",
+      "messages": [...]
+    }
+    ```
+    
+    Or use `"fast"` as a hint for Gemini.
+  </Tab>
+</Tabs>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-gateway-123" \
+  -d '{
+    "model": "gemini",
+    "messages": [
+      {"role": "user", "content": "What is FastAPI?"}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 512
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "id": "a3b8c9d2-e4f5-6a7b-8c9d-0e1f2a3b4c5d",
+  "provider": "gemini",
+  "content": "FastAPI is a modern, fast (high-performance) web framework for building APIs with Python 3.7+ based on standard Python type hints...",
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  }
+}
+```
+
+## Error Handling
+
+The provider includes comprehensive error handling:
+
+```python
+try:
+    # Gemini API call
+    ...
+except Exception as e:
+    import traceback
+    print(f"[Gemini Error Detailed]\n{traceback.format_exc()}")
+    raise
+```
+
+### Common Errors
+
+<AccordionGroup>
+  <Accordion title="Invalid API Key">
+    **Error:** `google.generativeai.types.generation_types.BlockedPromptException`
+    
+    **Solution:** Verify your `GEMINI_API_KEY` is correct and active
+  </Accordion>
+
+  <Accordion title="Rate Limiting">
+    **Error:** `429 Too Many Requests`
+    
+    **Solution:** Implement retry logic or upgrade your API quota
+  </Accordion>
+
+  <Accordion title="Timeout">
+    **Error:** `TimeoutError`
+    
+    **Solution:** Increase `PROVIDER_TIMEOUT_SECONDS` in settings
+  </Accordion>
+</AccordionGroup>
+
+## Model Information
+
+### gemini-2.5-flash
+
+- **Speed:** Very fast response times
+- **Context Window:** Large context support
+- **Capabilities:** Text generation, conversation, reasoning
+- **Best For:** Production applications requiring speed and quality
+
+<Note>
+  To use a different Gemini model, modify the model name in `gemini.py:22`:
+  
+  ```python
+  model = genai.GenerativeModel('gemini-2.5-pro')  # Or other model
+  ```
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Ollama Provider" icon="server" href="/providers/ollama">
+    Learn about local model deployment
+  </Card>
+  
+  <Card title="Custom Providers" icon="code" href="/providers/custom">
+    Implement your own provider
+  </Card>
+  
+  <Card title="Rate Limiting" icon="gauge" href="/rate-limiting">
+    Configure rate limits
+  </Card>
+  
+  <Card title="Caching" icon="database" href="/caching">
+    Enable response caching
+  </Card>
+</CardGroup>

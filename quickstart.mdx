@@ -1,80 +1,331 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Deploy LLM Gateway Core with Docker Compose and make your first API request in 5 minutes
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
+Before you begin, ensure you have:
 
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+- Docker and Docker Compose installed
+- Google Gemini API Key (get one at [Google AI Studio](https://makersuite.google.com/app/apikey))
+- (Optional) Local Ollama instance for local model support
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  This quickstart uses Google Gemini for cloud-based inference. For local-only deployment with Ollama, see the [Installation guide](/installation).
 </Note>
+
+## Deploy with Docker Compose
+
+<Steps>
+  <Step title="Clone or navigate to the source directory">
+    ```bash
+    cd llm-gateway-core
+    ```
+  </Step>
+
+  <Step title="Create environment configuration">
+    Create a `.env` file in the project root with your configuration:
+
+    ```bash .env
+    # Provider Configuration
+    PROVIDER_TIMEOUT_SECONDS=60
+    PROVIDER_MAX_RETRIES=3
+    GEMINI_API_KEY=your_api_key_here
+    
+    # Redis Configuration
+    REDIS_URL=redis://redis:6379/0
+    
+    # Ollama Configuration (optional)
+    OLLAMA_BASE_URL=http://host.docker.internal:11434
+    
+    # API Authentication
+    API_KEYS=sk-gateway-123
+    
+    # Rate Limiting
+    RATE_LIMITER_CAPACITY=5
+    RATE_LIMITER_REFILL_RATE=1
+    
+    # Cache Configuration
+    CACHE_TTL_SECONDS=60
+    ```
+
+    <Warning>
+      Replace `your_api_key_here` with your actual Gemini API key. Never commit `.env` files to version control.
+    </Warning>
+  </Step>
+
+  <Step title="Start the gateway stack">
+    Deploy all services with a single command:
+
+    ```bash
+    docker-compose up -d --build
+    ```
+
+    Docker Compose will start:
+    - **Gateway API** on port 8000
+    - **Redis** for caching and rate limiting
+    - **Prometheus** for metrics collection
+    - **Grafana** for monitoring dashboards
+    - **Streamlit Frontend** for testing
+  </Step>
+
+  <Step title="Verify deployment">
+    Check that all services are running:
+
+    ```bash
+    docker-compose ps
+    ```
+
+    Test the health endpoint:
+
+    ```bash
+    curl http://localhost:8000/api/v1/health
+    ```
+
+    Expected response:
+    ```json
+    {"status": "ok"}
+    ```
+  </Step>
+</Steps>
+
+## Make Your First API Request
+
+The gateway is now ready to process chat completion requests. The API uses a standardized request format that works across all providers.
+
+### Request Schema
+
+```json Request Format
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Your prompt here"
+    }
+  ],
+  "model_hint": "online",
+  "max_tokens": 512,
+  "temperature": 0.7
+}
+```
+
+<Note>
+  **Authentication Required**: All requests must include the `X-API-Key` header with a valid API key from your `.env` configuration.
+</Note>
+
+### Send a Chat Completion Request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-gateway-123" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": "Explain what a Large Language Model is in one sentence."
+      }
+    ],
+    "model_hint": "online",
+    "max_tokens": 100,
+    "temperature": 0.7
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:8000/api/v1/chat"
+headers = {
+    "Content-Type": "application/json",
+    "X-API-Key": "sk-gateway-123"
+}
+data = {
+    "messages": [
+        {
+            "role": "user",
+            "content": "Explain what a Large Language Model is in one sentence."
+        }
+    ],
+    "model_hint": "online",
+    "max_tokens": 100,
+    "temperature": 0.7
+}
+
+response = requests.post(url, json=data, headers=headers)
+print(response.json())
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:8000/api/v1/chat', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-API-Key': 'sk-gateway-123'
+  },
+  body: JSON.stringify({
+    messages: [
+      {
+        role: 'user',
+        content: 'Explain what a Large Language Model is in one sentence.'
+      }
+    ],
+    model_hint: 'online',
+    max_tokens: 100,
+    temperature: 0.7
+  })
+});
+
+const data = await response.json();
+console.log(data);
+```
+
+</CodeGroup>
+
+### Response Format
+
+```json Response
+{
+  "id": "chat-1234567890",
+  "provider": "gemini",
+  "content": "A Large Language Model is an AI system trained on vast amounts of text data to understand and generate human-like language.",
+  "usage": {
+    "prompt_tokens": 15,
+    "completion_tokens": 28,
+    "total_tokens": 43
+  }
+}
+```
+
+## Provider Selection with Model Hints
+
+The gateway routes requests to different providers based on the `model_hint` parameter:
+
+<CodeGroup>
+
+```json Online/Fast (Gemini)
+{
+  "messages": [{"role": "user", "content": "Hello"}],
+  "model_hint": "online"
+}
+// Also accepts: "fast" or "gemini"
+```
+
+```json Local/Secure (Ollama)
+{
+  "messages": [{"role": "user", "content": "Hello"}],
+  "model_hint": "local"
+}
+// Also accepts: "secure" or "ollama"
+```
+
+</CodeGroup>
+
+<Note>
+  If no `model_hint` is provided, the gateway defaults to Ollama (local provider).
+</Note>
+
+## Test Rate Limiting
+
+The gateway enforces rate limits to protect system resources. By default:
+
+- **Capacity**: 5 requests per client
+- **Refill Rate**: 1 token per second
+
+Try exceeding the rate limit:
+
+```bash
+for i in {1..10}; do
+  curl -X POST http://localhost:8000/api/v1/chat \
+    -H "Content-Type: application/json" \
+    -H "X-API-Key: sk-gateway-123" \
+    -d '{
+      "messages": [{"role": "user", "content": "Test '$i'"}],
+      "model_hint": "online"
+    }'
+  echo ""
+done
+```
+
+After 5 requests, you'll receive a 429 response:
+
+```json
+{
+  "detail": "Too many requests. Please wait before trying again."
+}
+```
+
+## Access the Web Interface
+
+The Streamlit frontend provides a user-friendly interface for testing:
+
+```bash
+open http://localhost:8501
+```
+
+Features:
+- Select execution mode (Online/Local)
+- Submit queries interactively
+- View formatted responses
+- Real-time testing without API calls
+
+## View Monitoring Dashboards
+
+Access Grafana for real-time metrics visualization:
+
+```bash
+open http://localhost:3000
+```
+
+Default credentials:
+- **Username**: admin
+- **Password**: admin
+
+The dashboard shows:
+- Request rates by provider
+- Cache hit/miss ratios
+- Rate limiting metrics
+- Response latencies
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation Guide" icon="book" href="/installation">
+    Learn about detailed configuration options and production deployment
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/chat">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Gateway not responding
+
+Check service logs:
+```bash
+docker-compose logs gateway
+```
+
+### Rate limit errors
+
+Adjust rate limiting in `.env`:
+```bash
+RATE_LIMITER_CAPACITY=10
+RATE_LIMITER_REFILL_RATE=2
+```
+
+Restart services:
+```bash
+docker-compose restart gateway
+```
+
+### Gemini authentication errors
+
+Verify your API key is correctly set in `.env` and restart:
+```bash
+docker-compose restart gateway
+```

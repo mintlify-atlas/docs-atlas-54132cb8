@@ -1,0 +1,301 @@
+---
+title: "Error Responses"
+description: "Error response schemas and HTTP status codes"
+---
+
+## Overview
+
+The LLM Gateway API uses standard HTTP status codes to indicate the success or failure of requests. Error responses include a `detail` field with a human-readable message explaining the issue.
+
+## Error Response Schema
+
+All error responses follow this structure:
+
+<ResponseField name="detail" type="string" required>
+  A human-readable message describing the error.
+</ResponseField>
+
+## HTTP Status Codes
+
+### 401 Unauthorized
+
+Returned when the API key is invalid, missing, or not authorized to access the resource.
+
+<CodeGroup>
+
+```json Response
+{
+  "detail": "Invalid or missing API Key"
+}
+```
+
+```bash cURL Example
+curl -X POST https://api.example.com/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: invalid_key" \
+  -d '{
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+
+# Response: 401 Unauthorized
+# {"detail": "Invalid or missing API Key"}
+```
+
+</CodeGroup>
+
+<Expandable title="Common Causes">
+  - Missing `X-API-Key` header in the request
+  - API key is invalid or has been revoked
+  - API key does not have permission for the requested resource
+  - Typo in the API key value
+</Expandable>
+
+<Note>
+Always include your API key in the `X-API-Key` header of your requests. Keep your API keys secure and never expose them in client-side code.
+</Note>
+
+### 429 Too Many Requests
+
+Returned when you exceed the rate limit for your API key or IP address.
+
+<CodeGroup>
+
+```json Response
+{
+  "detail": "Too many requests. Please wait before trying again."
+}
+```
+
+```python Python Example
+import requests
+import time
+
+api_key = "your-api-key"
+url = "https://api.example.com/v1/chat"
+
+for i in range(100):  # Making too many requests
+    response = requests.post(
+        url,
+        headers={"X-API-Key": api_key},
+        json={"messages": [{"role": "user", "content": "Hello"}]}
+    )
+    
+    if response.status_code == 429:
+        print("Rate limited! Waiting before retry...")
+        time.sleep(5)  # Wait before retrying
+        continue
+```
+
+</CodeGroup>
+
+<Expandable title="Rate Limiting Details">
+  The LLM Gateway implements a token bucket rate limiting algorithm:
+  
+  - **Capacity**: Maximum number of requests in the bucket
+  - **Refill Rate**: Rate at which request tokens are added back
+  - **Client Identification**: Based on API key or IP address
+  
+  Rate limits are enforced per client (API key or IP) and are backed by Redis for distributed rate limiting.
+</Expandable>
+
+<Warning>
+When you receive a 429 error, implement exponential backoff in your retry logic. Wait a few seconds before retrying, and increase the wait time with each subsequent failure.
+</Warning>
+
+### 500 Internal Server Error
+
+Returned when an unexpected error occurs on the server side.
+
+<CodeGroup>
+
+```json Response
+{
+  "detail": "Internal server error occurred while processing your request"
+}
+```
+
+```json Alternative Format
+{
+  "detail": "Provider service unavailable"
+}
+```
+
+</CodeGroup>
+
+<Expandable title="Common Causes">
+  - Downstream LLM provider is unavailable
+  - Database or Redis connection failure
+  - Unexpected exception in request processing
+  - Service configuration error
+  - Resource exhaustion (memory, connections)
+</Expandable>
+
+<Tip>
+If you consistently receive 500 errors, check the API status page or contact support. These errors are typically temporary and resolved automatically.
+</Tip>
+
+## Error Handling Best Practices
+
+### Retry Logic
+
+Implement proper retry logic with exponential backoff:
+
+<CodeGroup>
+
+```python Python
+import requests
+import time
+from typing import Optional
+
+def chat_with_retry(
+    messages: list,
+    api_key: str,
+    max_retries: int = 3
+) -> Optional[dict]:
+    url = "https://api.example.com/v1/chat"
+    headers = {"X-API-Key": api_key}
+    payload = {"messages": messages}
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, headers=headers, json=payload)
+            
+            if response.status_code == 200:
+                return response.json()
+            
+            elif response.status_code == 429:
+                wait_time = 2 ** attempt  # Exponential backoff
+                print(f"Rate limited. Waiting {wait_time}s...")
+                time.sleep(wait_time)
+            
+            elif response.status_code == 401:
+                print("Authentication failed. Check your API key.")
+                return None
+            
+            elif response.status_code == 500:
+                wait_time = 2 ** attempt
+                print(f"Server error. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            
+            else:
+                print(f"Unexpected error: {response.status_code}")
+                return None
+                
+        except requests.RequestException as e:
+            print(f"Request failed: {e}")
+            time.sleep(2 ** attempt)
+    
+    print("Max retries exceeded")
+    return None
+```
+
+```javascript JavaScript
+async function chatWithRetry(messages, apiKey, maxRetries = 3) {
+  const url = "https://api.example.com/v1/chat";
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey
+        },
+        body: JSON.stringify({ messages })
+      });
+      
+      if (response.ok) {
+        return await response.json();
+      }
+      
+      const error = await response.json();
+      
+      if (response.status === 429) {
+        const waitTime = Math.pow(2, attempt) * 1000;
+        console.log(`Rate limited. Waiting ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      } else if (response.status === 401) {
+        console.error("Authentication failed. Check your API key.");
+        return null;
+      } else if (response.status === 500) {
+        const waitTime = Math.pow(2, attempt) * 1000;
+        console.log(`Server error. Retrying in ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      } else {
+        console.error(`Unexpected error: ${response.status}`);
+        return null;
+      }
+    } catch (error) {
+      console.error(`Request failed: ${error}`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+    }
+  }
+  
+  console.error("Max retries exceeded");
+  return null;
+}
+```
+
+</CodeGroup>
+
+### Error Response Validation
+
+Always validate error responses before processing:
+
+```python Python
+response = requests.post(url, headers=headers, json=payload)
+
+if not response.ok:
+    error_data = response.json()
+    error_message = error_data.get("detail", "Unknown error")
+    
+    # Log error for monitoring
+    logger.error(f"API Error {response.status_code}: {error_message}")
+    
+    # Handle specific error types
+    if response.status_code == 401:
+        raise AuthenticationError(error_message)
+    elif response.status_code == 429:
+        raise RateLimitError(error_message)
+    elif response.status_code >= 500:
+        raise ServerError(error_message)
+```
+
+## Error Response From Source
+
+Based on the source code in `chat.py`, here are the specific error conditions:
+
+### Authentication Check (Line 28-32)
+
+```python Python
+if api_key not in valid_keys:
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing API Key"
+    )
+```
+
+### Rate Limit Check (Line 35-40)
+
+```python Python
+if not rate_limiter.allow(key):
+    RATE_LIMIT_BLOCKED.inc()
+    raise HTTPException(
+        status_code=429, 
+        detail="Too many requests. Please wait before trying again."
+    )
+```
+
+## Summary
+
+| Status Code | Error Type | Retry? | Common Fix |
+|-------------|------------|--------|------------|
+| 401 | Unauthorized | No | Check API key in `X-API-Key` header |
+| 429 | Rate Limited | Yes | Implement exponential backoff |
+| 500 | Server Error | Yes | Wait and retry, contact support if persistent |
+
+## Related Documentation
+
+- [ChatRequest](/api/schemas/chat-request) - Request schema with validation rules
+- [ChatResponse](/api/schemas/chat-response) - Successful response schema
+- [Authentication](/api/chat) - API key setup and usage

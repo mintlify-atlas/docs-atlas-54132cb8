@@ -1,0 +1,567 @@
+---
+title: Grafana Setup
+description: Configure Grafana dashboards to visualize LLM Gateway metrics
+---
+
+Grafana provides powerful visualization and dashboarding capabilities for monitoring your LLM Gateway deployment. The gateway includes automatic Grafana provisioning with Prometheus as a pre-configured data source.
+
+## Quick Start
+
+<Steps>
+  <Step title="Start the stack">
+    Launch all services including Grafana:
+    
+    ```bash
+    docker-compose up -d
+    ```
+  </Step>
+  
+  <Step title="Access Grafana">
+    Open your browser to:
+    
+    ```
+    http://localhost:3000
+    ```
+    
+    <Info>
+      Anonymous access is enabled by default for development. You can also log in with:
+      - **Username**: `admin`
+      - **Password**: `admin`
+    </Info>
+  </Step>
+  
+  <Step title="Verify data source">
+    Prometheus should already be configured as the default data source. Verify by navigating to:
+    
+    **Configuration** → **Data Sources** → **Prometheus**
+    
+    You should see status: "Data source is working"
+  </Step>
+  
+  <Step title="Create your first dashboard">
+    Click the **+** icon → **Dashboard** → **Add new panel** to start visualizing metrics.
+  </Step>
+</Steps>
+
+## Automatic Provisioning
+
+Grafana is automatically configured through provisioning files mounted from the repository.
+
+### Data Source Configuration
+
+The Prometheus data source is provisioned via `grafana/provisioning/datasources/datasource.yml`:
+
+```yaml datasource.yml
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+```
+
+<ParamField path="name" type="string">
+  Display name for the data source in Grafana
+</ParamField>
+
+<ParamField path="type" type="string">
+  Data source type (prometheus, graphite, influxdb, etc.)
+</ParamField>
+
+<ParamField path="access" type="string">
+  `proxy` means Grafana server queries Prometheus (recommended for Docker)
+</ParamField>
+
+<ParamField path="url" type="string">
+  Prometheus server URL (uses Docker service name `prometheus:9090`)
+</ParamField>
+
+<ParamField path="isDefault" type="boolean">
+  Makes this the default data source for new panels
+</ParamField>
+
+### Dashboard Provisioning
+
+Dashboard auto-loading is configured via `grafana/provisioning/dashboards/dashboards.yml`:
+
+```yaml dashboards.yml
+apiVersion: 1
+providers:
+  - name: 'Standard Dashboards'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+```
+
+<Note>
+  Place dashboard JSON files in `grafana/provisioning/dashboards/` to auto-load them on Grafana startup.
+</Note>
+
+## Docker Configuration
+
+Grafana runs as a Docker service configured in `docker-compose.yml`:
+
+```yaml docker-compose.yml
+grafana:
+  image: grafana/grafana:latest
+  ports:
+    - "3000:3000"
+  volumes:
+    - ./grafana/provisioning:/etc/grafana/provisioning
+  environment:
+    - GF_SECURITY_ADMIN_PASSWORD=admin
+    - GF_AUTH_ANONYMOUS_ENABLED=true
+    - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+```
+
+### Environment Variables
+
+<ParamField path="GF_SECURITY_ADMIN_PASSWORD" type="string">
+  Admin user password (default: `admin`)
+</ParamField>
+
+<ParamField path="GF_AUTH_ANONYMOUS_ENABLED" type="boolean">
+  Enables anonymous access without login
+</ParamField>
+
+<ParamField path="GF_AUTH_ANONYMOUS_ORG_ROLE" type="string">
+  Role for anonymous users (`Viewer`, `Editor`, or `Admin`)
+</ParamField>
+
+<Warning>
+  **Production Security**: Disable anonymous access and change the default admin password:
+  
+  ```yaml
+  environment:
+    - GF_SECURITY_ADMIN_PASSWORD=your_secure_password
+    - GF_AUTH_ANONYMOUS_ENABLED=false
+  ```
+</Warning>
+
+## Creating Dashboards
+
+### Dashboard Example: Gateway Overview
+
+Create a comprehensive dashboard to monitor gateway health:
+
+<Steps>
+  <Step title="Create new dashboard">
+    Click **+** → **Dashboard** → **Add new panel**
+  </Step>
+  
+  <Step title="Add request rate panel">
+    **Panel 1: Request Rate**
+    
+    - **Query**: `rate(gateway_requests_total[1m])`
+    - **Panel type**: Graph
+    - **Title**: "Requests per Second"
+    - **Y-axis label**: "req/s"
+  </Step>
+  
+  <Step title="Add latency panel">
+    **Panel 2: Request Latency (P95)**
+    
+    - **Query**: `histogram_quantile(0.95, rate(gateway_request_latency_seconds_bucket[5m]))`
+    - **Panel type**: Graph
+    - **Title**: "Request Latency (95th percentile)"
+    - **Y-axis label**: "seconds"
+  </Step>
+  
+  <Step title="Add active requests panel">
+    **Panel 3: Active Requests**
+    
+    - **Query**: `gateway_active_requests`
+    - **Panel type**: Stat
+    - **Title**: "Active Requests"
+  </Step>
+  
+  <Step title="Add cache hit rate panel">
+    **Panel 4: Cache Hit Rate**
+    
+    - **Query**: `rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) * 100`
+    - **Panel type**: Gauge
+    - **Title**: "Cache Hit Rate (%)"
+    - **Thresholds**: Red < 50%, Yellow 50-80%, Green > 80%
+  </Step>
+  
+  <Step title="Save dashboard">
+    Click **Save** → Enter name "LLM Gateway Overview" → **Save**
+  </Step>
+</Steps>
+
+### Dashboard Example: Provider Performance
+
+Monitor individual provider performance:
+
+<Accordion title="Provider Metrics Dashboard">
+  **Panel 1: Calls by Provider**
+  ```promql
+  sum by (provider) (rate(provider_calls_total[5m]))
+  ```
+  - Panel type: Bar gauge
+  - Legend: `{{provider}}`
+  
+  **Panel 2: Provider Latency**
+  ```promql
+  histogram_quantile(0.95, sum by (provider, le) (rate(provider_call_latency_seconds_bucket[5m])))
+  ```
+  - Panel type: Time series
+  - Legend: `{{provider}} - P95`
+  
+  **Panel 3: Provider Error Rate**
+  ```promql
+  rate(provider_failures_total[5m]) / rate(provider_calls_total[5m]) * 100
+  ```
+  - Panel type: Time series
+  - Legend: `{{provider}}`
+  - Y-axis: Percentage
+  
+  **Panel 4: Provider Success Rate**
+  ```promql
+  sum by (provider) (provider_calls_total - provider_failures_total)
+  ```
+  - Panel type: Stat
+  - Calculation: Total
+</Accordion>
+
+## Essential Panels
+
+Recommended panels for monitoring LLM Gateway:
+
+<AccordionGroup>
+  <Accordion title="Performance Metrics" icon="gauge">
+    ### Request Rate
+    ```promql
+    rate(gateway_requests_total[1m])
+    ```
+    Shows requests per second over 1-minute windows.
+    
+    ### P50/P95/P99 Latency
+    ```promql
+    histogram_quantile(0.50, rate(gateway_request_latency_seconds_bucket[5m]))
+    histogram_quantile(0.95, rate(gateway_request_latency_seconds_bucket[5m]))
+    histogram_quantile(0.99, rate(gateway_request_latency_seconds_bucket[5m]))
+    ```
+    Track latency percentiles to identify performance degradation.
+    
+    ### Active Connections
+    ```promql
+    gateway_active_requests
+    ```
+    Monitor concurrent request processing.
+  </Accordion>
+
+  <Accordion title="Cache Performance" icon="database">
+    ### Cache Hit Rate
+    ```promql
+    rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) * 100
+    ```
+    Percentage of requests served from cache.
+    
+    ### Cache Hits vs Misses
+    ```promql
+    rate(cache_hits_total[5m])
+    rate(cache_misses_total[5m])
+    ```
+    Visualize both metrics on the same graph.
+    
+    ### Cache Savings
+    ```promql
+    rate(cache_hits_total[5m])
+    ```
+    Number of provider calls avoided per second.
+  </Accordion>
+
+  <Accordion title="Provider Health" icon="server">
+    ### Provider Calls by Type
+    ```promql
+    sum by (provider) (rate(provider_calls_total[5m]))
+    ```
+    Distribution of traffic across providers.
+    
+    ### Provider Error Rate
+    ```promql
+    sum by (provider) (rate(provider_failures_total[5m])) / sum by (provider) (rate(provider_calls_total[5m])) * 100
+    ```
+    Error percentage by provider.
+    
+    ### Provider Latency Comparison
+    ```promql
+    histogram_quantile(0.95, sum by (provider, le) (rate(provider_call_latency_seconds_bucket[5m])))
+    ```
+    Compare P95 latency across providers.
+  </Accordion>
+
+  <Accordion title="Rate Limiting" icon="shield">
+    ### Allowed vs Blocked Requests
+    ```promql
+    rate(rate_limit_allowed_total[5m])
+    rate(rate_limit_blocked_total[5m])
+    ```
+    Visualize rate limiter activity.
+    
+    ### Block Rate Percentage
+    ```promql
+    rate(rate_limit_blocked_total[5m]) / (rate(rate_limit_allowed_total[5m]) + rate(rate_limit_blocked_total[5m])) * 100
+    ```
+    Percentage of requests blocked.
+    
+    ### Total Blocked Requests
+    ```promql
+    rate_limit_blocked_total
+    ```
+    Cumulative count of blocked requests.
+  </Accordion>
+</AccordionGroup>
+
+## Alert Configuration
+
+Set up alerts to notify you of issues:
+
+<Steps>
+  <Step title="Navigate to alerting">
+    Go to **Alerting** → **Alert rules** → **New alert rule**
+  </Step>
+  
+  <Step title="Configure conditions">
+    Example: High error rate alert
+    
+    ```promql
+    rate(provider_failures_total[5m]) / rate(provider_calls_total[5m]) > 0.1
+    ```
+    
+    Triggers when error rate exceeds 10%.
+  </Step>
+  
+  <Step title="Set evaluation interval">
+    - **Evaluate every**: 1m
+    - **For**: 5m
+    
+    Alert fires if condition is true for 5 consecutive minutes.
+  </Step>
+  
+  <Step title="Configure notification channels">
+    Set up notification channels (Slack, email, PagerDuty, etc.) in:
+    
+    **Alerting** → **Contact points** → **New contact point**
+  </Step>
+</Steps>
+
+### Recommended Alerts
+
+<CardGroup cols={2}>
+  <Card title="High Error Rate" icon="triangle-exclamation">
+    ```promql
+    rate(provider_failures_total[5m]) / rate(provider_calls_total[5m]) > 0.05
+    ```
+    Alert when >5% of provider calls fail
+  </Card>
+  
+  <Card title="High Latency" icon="clock">
+    ```promql
+    histogram_quantile(0.95, rate(gateway_request_latency_seconds_bucket[5m])) > 2
+    ```
+    Alert when P95 latency exceeds 2 seconds
+  </Card>
+  
+  <Card title="Cache Hit Rate Drop" icon="database">
+    ```promql
+    rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) < 0.5
+    ```
+    Alert when cache hit rate drops below 50%
+  </Card>
+  
+  <Card title="High Rate Limit Blocks" icon="ban">
+    ```promql
+    rate(rate_limit_blocked_total[5m]) > 10
+    ```
+    Alert when blocking >10 requests/second
+  </Card>
+</CardGroup>
+
+## Dashboard Variables
+
+Add variables to make dashboards dynamic:
+
+<Steps>
+  <Step title="Open dashboard settings">
+    Click **Dashboard settings** (gear icon) → **Variables** → **Add variable**
+  </Step>
+  
+  <Step title="Create provider variable">
+    - **Name**: `provider`
+    - **Type**: Query
+    - **Query**: `label_values(provider_calls_total, provider)`
+    - **Multi-value**: Enabled
+    - **Include All option**: Enabled
+  </Step>
+  
+  <Step title="Use variable in queries">
+    Reference the variable in panel queries:
+    
+    ```promql
+    rate(provider_calls_total{provider=~"$provider"}[5m])
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Variables allow filtering dashboards by provider, time range, or any label value without creating multiple dashboards.
+</Tip>
+
+## Exporting and Sharing
+
+### Export Dashboard JSON
+
+<Steps>
+  <Step title="Open dashboard">
+    Navigate to the dashboard you want to export
+  </Step>
+  
+  <Step title="Access share menu">
+    Click **Share** (icon at top) → **Export** → **Save to file**
+  </Step>
+  
+  <Step title="Save to provisioning directory">
+    Save the JSON file to:
+    ```
+    grafana/provisioning/dashboards/llm-gateway.json
+    ```
+    
+    It will auto-load on next Grafana restart.
+  </Step>
+</Steps>
+
+### Share Dashboard Link
+
+Generate shareable links:
+
+1. Click **Share** → **Link**
+2. Configure options:
+   - **Lock time range**: Preserves current time selection
+   - **Shorten URL**: Creates shorter link
+3. Copy and share the URL
+
+<Warning>
+  Ensure recipients have access to your Grafana instance. For external sharing, consider using **Snapshot** feature instead.
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Dashboard Organization" icon="folder-tree">
+    - **Group by concern**: Create separate dashboards for Performance, Providers, Cache, etc.
+    - **Use folders**: Organize dashboards into folders ("LLM Gateway", "Infrastructure")
+    - **Consistent naming**: Use clear, descriptive dashboard names
+    - **Add descriptions**: Include dashboard purpose and key metrics in description
+  </Accordion>
+
+  <Accordion title="Panel Configuration" icon="chart-line">
+    - **Descriptive titles**: Make panel purpose immediately clear
+    - **Appropriate visualizations**: Time series for trends, gauges for ratios, stats for current values
+    - **Set units**: Configure Y-axis units (seconds, percentage, requests/sec)
+    - **Use legends**: Enable legends with `{{label}}` syntax for multi-series
+    - **Color coding**: Use consistent colors (green = good, yellow = warning, red = critical)
+  </Accordion>
+
+  <Accordion title="Query Optimization" icon="bolt">
+    - **Use appropriate intervals**: Match rate() interval to your needs (1m for real-time, 5m for trends)
+    - **Limit time range**: Don't query more data than necessary
+    - **Use recording rules**: Pre-compute expensive queries in Prometheus
+    - **Minimize resolution**: Adjust **Min interval** in panel settings
+  </Accordion>
+
+  <Accordion title="Performance" icon="rocket">
+    - **Limit panels per dashboard**: 10-15 panels max for fast loading
+    - **Use template variables**: Filter data without multiple dashboards
+    - **Set refresh intervals**: Balance freshness vs load (30s-1m for most cases)
+    - **Cache query results**: Enable query caching in data source settings
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No data in panels" icon="circle-exclamation">
+    **Possible causes:**
+    
+    1. **Prometheus not scraping**: Check Prometheus UI at `http://localhost:9090/targets`
+    2. **Wrong time range**: Adjust time picker to include data
+    3. **Incorrect query**: Validate PromQL in Prometheus UI first
+    4. **Gateway not running**: Ensure gateway is up and exposing metrics
+    
+    **Debug steps:**
+    ```bash
+    # Check gateway metrics endpoint
+    curl http://localhost:8000/api/v1/metrics
+    
+    # Check Prometheus targets
+    curl http://localhost:9090/api/v1/targets
+    
+    # Verify data in Prometheus
+    curl 'http://localhost:9090/api/v1/query?query=gateway_requests_total'
+    ```
+  </Accordion>
+
+  <Accordion title="Grafana can't connect to Prometheus" icon="link-slash">
+    **Error**: "Bad Gateway" or "Service Unavailable"
+    
+    **Fix:**
+    1. Verify Prometheus is running:
+       ```bash
+       docker-compose ps prometheus
+       ```
+    
+    2. Check data source URL uses Docker service name:
+       ```yaml
+       url: http://prometheus:9090  # NOT localhost:9090
+       ```
+    
+    3. Restart Grafana:
+       ```bash
+       docker-compose restart grafana
+       ```
+  </Accordion>
+
+  <Accordion title="Dashboard not saving" icon="floppy-disk">
+    **Error**: "Dashboard save failed"
+    
+    **Cause**: Provisioned dashboards are read-only by default.
+    
+    **Fix:**
+    1. Save as new dashboard with different name
+    2. Or modify provisioning config to allow edits:
+       ```yaml
+       disableDeletion: false
+       editable: true
+       ```
+  </Accordion>
+
+  <Accordion title="Alerts not firing" icon="bell-slash">
+    **Check:**
+    1. Alert rule is active (not paused)
+    2. Notification channel is configured
+    3. Evaluation interval allows condition to persist
+    4. Query returns expected values in Explore tab
+    
+    **Test:**
+    - Use **Test** button in alert rule editor
+    - Check **Alerting** → **Alert rules** for evaluation history
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Metrics Reference" icon="list" href="/monitoring/metrics">
+    Learn about all available metrics and their meanings
+  </Card>
+  <Card title="Observability Overview" icon="chart-mixed" href="/monitoring/overview">
+    Understand the complete observability architecture
+  </Card>
+</CardGroup>

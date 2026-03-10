@@ -1,0 +1,159 @@
+---
+title: 'Provider Overview'
+description: 'Understanding the provider abstraction architecture in LLM Gateway Core'
+---
+
+## Architecture
+
+LLM Gateway Core uses a **provider abstraction layer** to support multiple LLM backends through a unified interface. This architecture enables:
+
+- Seamless switching between different LLM providers
+- Consistent API regardless of the underlying provider
+- Easy addition of new providers
+- Provider-agnostic routing and middleware
+
+## Provider Base Class
+
+All providers inherit from the `LLMProvider` abstract base class, which defines the contract every provider must implement.
+
+```python app/providers/base.py
+from abc import ABC, abstractmethod
+from app.api.v1.schemas import ChatRequest, ChatResponse
+
+class LLMProvider(ABC):
+    """
+    Abstract base class for LLM providers.
+    """
+    
+    @abstractmethod
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        """
+        Execute a chat completion request.
+        """
+        pass 
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """
+        Get the name of the LLM provider.
+        """
+        pass
+```
+
+### Required Methods
+
+<AccordionGroup>
+  <Accordion title="chat() - Execute chat completions">
+    **Signature:** `async def chat(self, request: ChatRequest) -> ChatResponse`
+    
+    - **Purpose:** Process a chat completion request and return a response
+    - **Input:** `ChatRequest` containing messages, model, and parameters
+    - **Output:** `ChatResponse` with generated content and usage stats
+    - **Async:** Must be async to support concurrent requests
+  </Accordion>
+
+  <Accordion title="name - Provider identifier">
+    **Signature:** `@property def name(self) -> str`
+    
+    - **Purpose:** Return a unique identifier for the provider
+    - **Examples:** `"gemini"`, `"ollama"`, `"openai"`
+    - **Usage:** Used for routing and response metadata
+  </Accordion>
+</AccordionGroup>
+
+## Available Providers
+
+LLM Gateway Core includes built-in support for the following providers:
+
+<CardGroup cols={2}>
+  <Card title="Google Gemini" icon="google" href="/providers/gemini">
+    Cloud-based Google Gemini API integration with gemini-2.5-flash model
+  </Card>
+  
+  <Card title="Ollama" icon="server" href="/providers/ollama">
+    Local Ollama integration for privacy-focused deployments
+  </Card>
+</CardGroup>
+
+## Provider Registry
+
+Providers are registered in the `Router` class, which manages provider instances and handles request routing.
+
+```python app/core/router.py
+class Router:
+    def __init__(self):
+        self.providers = {
+            "gemini": GeminiProvider(),
+            "ollama": OllamaProvider(),
+        }
+    
+    def route(self, request) -> List[LLMProvider]:
+        """Routes the request to the appropriate provider."""
+        target = request.model or request.model_hint
+        
+        if target in ["online", "gemini", "fast"]:
+            return [self.providers["gemini"]]
+        elif target in ["ollama", "local", "secure"]:
+            return [self.providers["ollama"]]
+            
+        # Default fallback
+        return [self.providers["ollama"]]
+```
+
+## Request/Response Schema
+
+### ChatRequest
+
+```python
+class ChatRequest(BaseModel):
+    messages: List[Message]          # Conversation history
+    model: Optional[str] = None      # Specific model name
+    model_hint: Optional[str] = None # Routing hint (online/local)
+    max_tokens: Optional[int] = 512
+    temperature: Optional[float] = 0.7
+    stream: Optional[bool] = False
+```
+
+### ChatResponse
+
+```python
+class ChatResponse(BaseModel):
+    id: str              # Unique response ID
+    provider: str        # Provider that handled the request
+    content: str         # Generated text
+    usage: Usage         # Token usage statistics
+```
+
+### Usage Stats
+
+```python
+class Usage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+```
+
+<Note>
+  All providers must return responses in this standardized format, regardless of their native API structure.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Gemini Provider" icon="google" href="/providers/gemini">
+    Learn about Google Gemini integration
+  </Card>
+  
+  <Card title="Ollama Provider" icon="server" href="/providers/ollama">
+    Set up local Ollama deployment
+  </Card>
+  
+  <Card title="Custom Providers" icon="code" href="/providers/custom">
+    Implement your own provider
+  </Card>
+  
+  <Card title="Router Configuration" icon="route" href="/routing">
+    Configure request routing
+  </Card>
+</CardGroup>

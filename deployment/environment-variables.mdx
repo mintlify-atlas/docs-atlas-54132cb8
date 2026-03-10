@@ -1,0 +1,724 @@
+---
+title: 'Environment Variables'
+description: 'Complete reference for all LLM Gateway Core environment variables'
+---
+
+## Overview
+
+LLM Gateway Core is configured entirely through environment variables, allowing for flexible deployment without code modifications. This page provides a comprehensive reference for all available variables.
+
+## Configuration File
+
+Environment variables are typically defined in a `.env` file in the project root:
+
+```bash .env
+PROVIDER_TIMEOUT_SECONDS=60
+PROVIDER_MAX_RETRIES=3
+CACHE_TTL_SECONDS=60
+RATE_LIMITER_CAPACITY=5
+RATE_LIMITER_REFILL_RATE=1
+REDIS_URL=redis://127.0.0.1:6380/0
+GEMINI_API_KEY=your_api_key_here
+OLLAMA_BASE_URL=http://localhost:11434
+API_KEYS=sk-gateway-123
+```
+
+<Note>
+The gateway uses Pydantic Settings for configuration management, supporting both `.env` files and system environment variables.
+</Note>
+
+## Complete Variable Reference
+
+### PROVIDER_TIMEOUT_SECONDS
+
+<ParamField path="PROVIDER_TIMEOUT_SECONDS" type="integer" default="60" required={false}>
+  Maximum time in seconds to wait for an LLM provider response before timing out.
+</ParamField>
+
+**Type**: `int`  
+**Default**: `60`  
+**Range**: `1` - `300`  
+**Required**: No
+
+**Description**:
+Controls how long the gateway will wait for a response from LLM providers (Gemini, Ollama) before abandoning the request and returning a timeout error.
+
+**Use Cases**:
+- **Increase (90-120s)**: Complex queries, large context windows, slower models
+- **Decrease (30-45s)**: Fast-fail scenarios, real-time applications, high-traffic environments
+- **Production Recommendation**: `60` seconds for balanced behavior
+
+**Example**:
+```bash
+# Short timeout for quick responses
+PROVIDER_TIMEOUT_SECONDS=30
+
+# Extended timeout for complex queries
+PROVIDER_TIMEOUT_SECONDS=120
+```
+
+**Impact**:
+- Too low: Premature timeouts on legitimate slow queries
+- Too high: Long wait times on failed/stuck requests
+- Affects user experience and resource utilization
+
+---
+
+### PROVIDER_MAX_RETRIES
+
+<ParamField path="PROVIDER_MAX_RETRIES" type="integer" default="3" required={false}>
+  Number of retry attempts for failed provider requests.
+</ParamField>
+
+**Type**: `int`  
+**Default**: `3`  
+**Range**: `0` - `10`  
+**Required**: No
+
+**Description**:
+Defines how many times the gateway will retry a failed request to an LLM provider before giving up. Uses exponential backoff between retries.
+
+**Retry Logic**:
+- Only retries on transient errors (network issues, 5xx server errors, timeouts)
+- Does NOT retry on client errors (4xx responses, invalid requests)
+- Applies exponential backoff: 1s, 2s, 4s, 8s, etc.
+
+**Use Cases**:
+- **0 retries**: Development/testing, when immediate feedback is needed
+- **2-3 retries**: Production default, balances reliability and latency
+- **5+ retries**: Critical applications where success is paramount
+
+**Example**:
+```bash
+# No retries (fail fast)
+PROVIDER_MAX_RETRIES=0
+
+# Standard production setting
+PROVIDER_MAX_RETRIES=3
+
+# High reliability requirement
+PROVIDER_MAX_RETRIES=5
+```
+
+**Impact**:
+- More retries: Better reliability, higher latency on failures
+- Fewer retries: Lower latency, may fail on transient issues
+
+---
+
+### CACHE_TTL_SECONDS
+
+<ParamField path="CACHE_TTL_SECONDS" type="integer" default="60" required={false}>
+  Time-to-live for cached LLM responses in Redis.
+</ParamField>
+
+**Type**: `int`  
+**Default**: `60`  
+**Range**: `0` - `86400` (0 = disabled, max = 24 hours)  
+**Required**: No
+
+**Description**:
+Determines how long cached responses remain valid in Redis before expiring. Caching reduces API costs and improves response times for repeated queries.
+
+**Caching Behavior**:
+- Cache key includes: prompt, model, temperature, and other parameters
+- Exact match required for cache hit
+- Expired entries are automatically removed by Redis
+- Set to `0` to disable caching entirely
+
+**Use Cases by TTL**:
+- **0**: Disable caching (always fresh responses)
+- **60-300s**: Interactive applications (1-5 minutes)
+- **3600s**: FAQ/documentation bots (1 hour)
+- **86400s**: Static content, knowledge bases (24 hours)
+
+**Example**:
+```bash
+# Disable caching
+CACHE_TTL_SECONDS=0
+
+# Short cache for dynamic content
+CACHE_TTL_SECONDS=60
+
+# Extended cache for stable content
+CACHE_TTL_SECONDS=3600
+```
+
+**Considerations**:
+- Longer TTL: Lower costs, potential stale responses
+- Shorter TTL: Fresher responses, higher API usage
+- Balance based on content volatility and cost sensitivity
+
+---
+
+### RATE_LIMITER_CAPACITY
+
+<ParamField path="RATE_LIMITER_CAPACITY" type="integer" default="5" required={false}>
+  Maximum burst capacity for the token bucket rate limiter.
+</ParamField>
+
+**Type**: `int`  
+**Default**: `5`  
+**Range**: `1` - `1000`  
+**Required**: No
+
+**Description**:
+Sets the maximum number of tokens in the rate limiter's token bucket. This determines how many requests a client can make in a burst before being rate limited.
+
+**Token Bucket Algorithm**:
+- Each client has a separate bucket identified by API key
+- Each request consumes 1 token
+- Tokens refill at the rate defined by `RATE_LIMITER_REFILL_RATE`
+- Requests are rejected with HTTP 429 when bucket is empty
+
+**Use Cases**:
+- **Low capacity (5-10)**: Strict rate limiting, prevent abuse
+- **Medium capacity (50-100)**: Normal API usage
+- **High capacity (500+)**: Premium clients, internal services
+
+**Example**:
+```bash
+# Strict limiting for public API
+RATE_LIMITER_CAPACITY=5
+
+# Generous limits for paid tiers
+RATE_LIMITER_CAPACITY=100
+
+# Unrestricted for internal use
+RATE_LIMITER_CAPACITY=1000
+```
+
+**Rate Limiting Scenarios**:
+```bash
+# Allow 10 burst requests, then 1 per second
+RATE_LIMITER_CAPACITY=10
+RATE_LIMITER_REFILL_RATE=1
+
+# Allow 100 burst requests, then 10 per second
+RATE_LIMITER_CAPACITY=100
+RATE_LIMITER_REFILL_RATE=10
+```
+
+---
+
+### RATE_LIMITER_REFILL_RATE
+
+<ParamField path="RATE_LIMITER_REFILL_RATE" type="integer" default="1" required={false}>
+  Number of tokens added to the bucket per second.
+</ParamField>
+
+**Type**: `int`  
+**Default**: `1`  
+**Range**: `1` - `1000`  
+**Required**: No
+
+**Description**:
+Defines the sustained request rate by controlling how many tokens are added to each client's bucket per second.
+
+**Rate Calculations**:
+- `REFILL_RATE=1`: 1 request/second = 60 requests/minute = 3,600 requests/hour
+- `REFILL_RATE=10`: 10 requests/second = 600 requests/minute = 36,000 requests/hour
+- `REFILL_RATE=100`: 100 requests/second = 6,000 requests/minute
+
+**Example**:
+```bash
+# Conservative rate for free tier
+RATE_LIMITER_REFILL_RATE=1
+
+# Moderate rate for standard tier
+RATE_LIMITER_REFILL_RATE=10
+
+# High rate for enterprise tier
+RATE_LIMITER_REFILL_RATE=100
+```
+
+**Combined Examples**:
+```bash
+# Free tier: 5 burst, 1/sec sustained (60/min)
+RATE_LIMITER_CAPACITY=5
+RATE_LIMITER_REFILL_RATE=1
+
+# Pro tier: 50 burst, 10/sec sustained (600/min)
+RATE_LIMITER_CAPACITY=50
+RATE_LIMITER_REFILL_RATE=10
+
+# Enterprise: 100 burst, 50/sec sustained (3000/min)
+RATE_LIMITER_CAPACITY=100
+RATE_LIMITER_REFILL_RATE=50
+```
+
+---
+
+### REDIS_URL
+
+<ParamField path="REDIS_URL" type="string" default="redis://127.0.0.1:6380/0" required={true}>
+  Connection URL for the Redis instance used for caching and rate limiting.
+</ParamField>
+
+**Type**: `str`  
+**Default**: `redis://127.0.0.1:6380/0`  
+**Format**: `redis://[username:password@]host:port/database`  
+**Required**: Yes (gateway will not function without Redis)
+
+**Description**:
+Specifies the Redis connection string for the distributed cache and rate limiter storage.
+
+**URL Format Components**:
+- **Protocol**: `redis://` (or `rediss://` for TLS)
+- **Authentication**: `username:password@` (optional)
+- **Host**: hostname or IP address
+- **Port**: Redis port (default 6379)
+- **Database**: Redis database number (0-15)
+
+**Examples by Environment**:
+
+```bash
+# Local development (Redis on host)
+REDIS_URL=redis://127.0.0.1:6380/0
+
+# Docker Compose (Redis container)
+REDIS_URL=redis://redis:6379/0
+
+# With password authentication
+REDIS_URL=redis://:my_secure_password@redis:6379/0
+
+# With username and password
+REDIS_URL=redis://admin:secret_password@redis:6379/0
+
+# Remote Redis server
+REDIS_URL=redis://redis-prod.example.com:6379/1
+
+# Redis with TLS
+REDIS_URL=rediss://redis-prod.example.com:6380/0
+
+# Redis Sentinel (high availability)
+REDIS_URL=redis://sentinel1:26379,sentinel2:26379/mymaster/0
+
+# Redis Cluster
+REDIS_URL=redis://node1:6379,node2:6379,node3:6379/0
+```
+
+**Docker-Specific Configuration**:
+```yaml
+# docker-compose.yml
+services:
+  gateway:
+    environment:
+      - REDIS_URL=redis://redis:6379/0  # Use service name as hostname
+  redis:
+    ports:
+      - "6380:6379"  # Expose on host port 6380
+```
+
+**Testing Connection**:
+```bash
+# Test Redis connectivity
+redis-cli -u redis://127.0.0.1:6380/0 ping
+# Expected output: PONG
+
+# With authentication
+redis-cli -u redis://:password@host:6379/0 ping
+```
+
+<Warning>
+Always use authentication in production. Expose Redis only to trusted networks.
+</Warning>
+
+---
+
+### GEMINI_API_KEY
+
+<ParamField path="GEMINI_API_KEY" type="string" default="" required={false}>
+  API key for Google Gemini LLM integration.
+</ParamField>
+
+**Type**: `str`  
+**Default**: `""` (empty, Gemini provider disabled)  
+**Format**: Alphanumeric string from Google AI Studio  
+**Required**: Only if using Gemini (online/fast modes)
+
+**Description**:
+Authentication key for accessing Google's Gemini API. Required for the gateway to route requests to Gemini models.
+
+**Obtaining an API Key**:
+1. Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. Sign in with your Google account
+3. Click "Create API Key"
+4. Copy the generated key
+5. Set it as an environment variable
+
+**Example**:
+```bash
+# Production key
+GEMINI_API_KEY=AIzaSyBxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Development key
+GEMINI_API_KEY=AIzaSyDev_xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**Security Best Practices**:
+
+<Warning>
+- Never commit API keys to version control
+- Use separate keys for development and production
+- Rotate keys periodically
+- Monitor usage in Google Cloud Console
+- Set up billing alerts to prevent unexpected charges
+</Warning>
+
+```bash .gitignore
+# Always exclude environment files
+.env
+.env.local
+.env.*.local
+```
+
+**Usage Validation**:
+```bash
+# Test API key validity
+curl "https://generativelanguage.googleapis.com/v1/models?key=$GEMINI_API_KEY"
+```
+
+**Behavior When Unset**:
+- Gateway starts successfully
+- Requests to Gemini (online/fast modes) return errors
+- Ollama (local/secure modes) continue to work
+
+---
+
+### OLLAMA_BASE_URL
+
+<ParamField path="OLLAMA_BASE_URL" type="string" default="http://localhost:11434" required={false}>
+  Base URL for the Ollama API endpoint.
+</ParamField>
+
+**Type**: `str`  
+**Default**: `http://localhost:11434`  
+**Format**: Full HTTP/HTTPS URL  
+**Required**: Only if using Ollama (local/secure modes)
+
+**Description**:
+Specifies the endpoint for Ollama API requests. Ollama provides local LLM inference for private, secure, or offline deployments.
+
+**Configuration by Deployment**:
+
+```bash
+# Local development (Ollama on host machine)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Docker Compose (accessing host Ollama from container)
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+
+# Remote Ollama server
+OLLAMA_BASE_URL=http://ollama-server.internal:11434
+
+# Ollama with custom port
+OLLAMA_BASE_URL=http://localhost:8080
+
+# HTTPS (with reverse proxy)
+OLLAMA_BASE_URL=https://ollama.example.com
+```
+
+**Docker Compose Setup**:
+```yaml
+# docker-compose.yml
+services:
+  gateway:
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Required for Docker access to host
+```
+
+**Linux Docker Networking**:
+On Linux, `host.docker.internal` doesn't work by default. Use one of these approaches:
+
+```yaml
+# Option 1: Use host network mode
+services:
+  gateway:
+    network_mode: host
+    environment:
+      - OLLAMA_BASE_URL=http://localhost:11434
+
+# Option 2: Use host IP address
+services:
+  gateway:
+    environment:
+      - OLLAMA_BASE_URL=http://192.168.1.100:11434
+
+# Option 3: Run Ollama in Docker too
+services:
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+  gateway:
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+```
+
+**Verifying Ollama Connectivity**:
+```bash
+# Test Ollama is accessible
+curl http://localhost:11434/api/tags
+
+# From Docker container
+docker-compose exec gateway curl http://host.docker.internal:11434/api/tags
+
+# Expected response: JSON with available models
+```
+
+**Installing Ollama**:
+```bash
+# macOS/Linux
+curl https://ollama.ai/install.sh | sh
+
+# Start Ollama
+ollama serve
+
+# Pull a model
+ollama pull llama2
+```
+
+---
+
+### API_KEYS
+
+<ParamField path="API_KEYS" type="string" default="sk-gateway-123" required={true}>
+  Comma-separated list of valid API keys for gateway authentication.
+</ParamField>
+
+**Type**: `str`  
+**Default**: `sk-gateway-123`  
+**Format**: Comma-separated string of keys  
+**Required**: Yes (gateway enforces authentication)
+
+**Description**:
+Defines the valid API keys that clients must provide to access the gateway. Multiple keys allow for different clients or access tiers.
+
+**Format**:
+```bash
+# Single key
+API_KEYS=sk-gateway-production-xyz789
+
+# Multiple keys (comma-separated, no spaces)
+API_KEYS=sk-gateway-client1,sk-gateway-client2,sk-gateway-admin
+
+# With descriptive prefixes
+API_KEYS=sk-prod-web-app,sk-prod-mobile-app,sk-dev-testing
+```
+
+**Client Usage**:
+Clients include the API key in the `Authorization` header:
+
+```bash
+# Using Bearer token
+curl -X POST http://localhost:8000/api/v1/chat/completions \
+  -H "Authorization: Bearer sk-gateway-123" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+**Generating Secure Keys**:
+
+<Note>
+Always use cryptographically secure random keys in production.
+</Note>
+
+```bash
+# Using OpenSSL
+openssl rand -hex 32
+# Output: sk-gateway-a1b2c3d4e5f6...
+
+# Using Python
+python3 -c "import secrets; print('sk-gateway-' + secrets.token_urlsafe(32))"
+# Output: sk-gateway-Xy9Zk3Qm7Rp...
+
+# Generate multiple keys
+for i in {1..5}; do openssl rand -hex 16 | sed 's/^/sk-prod-/'; done
+```
+
+**Key Management Strategies**:
+
+```bash
+# Environment-specific keys
+# Development
+API_KEYS=sk-dev-local-testing
+
+# Staging
+API_KEYS=sk-staging-app1,sk-staging-app2
+
+# Production
+API_KEYS=sk-prod-web-Xy9Zk3Qm,sk-prod-mobile-Rp7Tm2Vn,sk-prod-internal-Qs8Un4Wo
+```
+
+**Multi-Tier Access**:
+```bash
+# Different keys for different service tiers
+API_KEYS=sk-free-user1,sk-free-user2,sk-pro-user3,sk-enterprise-user4
+
+# Combine with different rate limiting per key (future enhancement)
+```
+
+**Security Recommendations**:
+
+<Warning>
+1. **Never use default keys in production** (`sk-gateway-123` is for development only)
+2. **Rotate keys regularly** (quarterly or after suspected compromise)
+3. **Use separate keys per client** (enables individual key revocation)
+4. **Monitor key usage** (detect unauthorized access or compromised keys)
+5. **Store keys securely** (use secrets managers, not plain text files)
+</Warning>
+
+**Secrets Management**:
+```bash
+# AWS Secrets Manager
+aws secretsmanager get-secret-value --secret-id llm-gateway/api-keys \
+  --query SecretString --output text
+
+# HashiCorp Vault
+vault kv get -field=api_keys secret/llm-gateway
+
+# Kubernetes Secret
+kubectl create secret generic gateway-api-keys --from-literal=keys="sk-prod-..."
+```
+
+---
+
+## Environment-Specific Examples
+
+### Local Development
+
+```bash .env.development
+# Provider Configuration
+PROVIDER_TIMEOUT_SECONDS=30
+PROVIDER_MAX_RETRIES=2
+
+# Cache Configuration  
+CACHE_TTL_SECONDS=300
+REDIS_URL=redis://127.0.0.1:6380/0
+
+# Rate Limiting (generous for testing)
+RATE_LIMITER_CAPACITY=100
+RATE_LIMITER_REFILL_RATE=10
+
+# Provider Integration
+GEMINI_API_KEY=AIzaSy_dev_key_here
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Authentication
+API_KEYS=sk-dev-test-123
+```
+
+### Docker Compose
+
+```bash .env.docker
+# Provider Configuration
+PROVIDER_TIMEOUT_SECONDS=60
+PROVIDER_MAX_RETRIES=3
+
+# Cache Configuration
+CACHE_TTL_SECONDS=60
+REDIS_URL=redis://redis:6379/0
+
+# Rate Limiting
+RATE_LIMITER_CAPACITY=10
+RATE_LIMITER_REFILL_RATE=2
+
+# Provider Integration
+GEMINI_API_KEY=AIzaSy_your_actual_key
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+
+# Authentication
+API_KEYS=sk-gateway-docker-xyz789
+```
+
+### Production
+
+```bash .env.production
+# Provider Configuration (optimized for reliability)
+PROVIDER_TIMEOUT_SECONDS=45
+PROVIDER_MAX_RETRIES=3
+
+# Cache Configuration (longer TTL for cost savings)
+CACHE_TTL_SECONDS=300
+REDIS_URL=redis://:strong_redis_password@redis-prod.internal:6379/0
+
+# Rate Limiting (strict to prevent abuse)
+RATE_LIMITER_CAPACITY=5
+RATE_LIMITER_REFILL_RATE=1
+
+# Provider Integration (from secrets manager)
+GEMINI_API_KEY=${GEMINI_KEY_FROM_VAULT}
+OLLAMA_BASE_URL=http://ollama-prod.internal:11434
+
+# Authentication (secure, rotated keys)
+API_KEYS=sk-prod-web-Xy9Zk3Qm,sk-prod-mobile-Rp7Tm2Vn,sk-prod-internal-Qs8Un4Wo
+```
+
+## Validation and Troubleshooting
+
+### Checking Current Configuration
+
+```python
+# View loaded configuration (excluding secrets)
+from app.core.config import settings
+
+print(f"Timeout: {settings.PROVIDER_TIMEOUT_SECONDS}s")
+print(f"Max Retries: {settings.PROVIDER_MAX_RETRIES}")
+print(f"Cache TTL: {settings.CACHE_TTL_SECONDS}s")
+print(f"Rate Limit Capacity: {settings.RATE_LIMITER_CAPACITY}")
+print(f"Rate Limit Refill: {settings.RATE_LIMITER_REFILL_RATE}/s")
+print(f"Redis: {settings.REDIS_URL.split('@')[-1]}")  # Hide password
+print(f"Ollama: {settings.OLLAMA_BASE_URL}")
+print(f"Gemini Configured: {bool(settings.GEMINI_API_KEY)}")
+print(f"API Keys Count: {len(settings.API_KEYS.split(','))}")
+```
+
+### Common Configuration Errors
+
+**Redis Connection Failed**
+```bash
+# Error: Connection refused
+# Solution: Check Redis is running
+redis-cli ping
+
+# Solution: Verify URL hostname (use service name in Docker)
+REDIS_URL=redis://redis:6379/0  # Not localhost in Docker!
+```
+
+**Ollama Not Accessible**
+```bash
+# Error: Connection refused on Ollama requests
+# Solution: Test Ollama endpoint
+curl http://localhost:11434/api/tags
+
+# Solution: Use host.docker.internal in Docker
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+```
+
+**Invalid API Key**
+```bash
+# Error: 401 Unauthorized
+# Solution: Verify API key is in the list
+echo $API_KEYS | grep -o 'sk-gateway-123'
+
+# Solution: Ensure no whitespace in keys
+API_KEYS=key1,key2  # ✓ Correct
+API_KEYS=key1, key2  # ✗ Space causes issues
+```
+
+**Type Validation Error**
+```bash
+# Error: validation error for Settings
+# Solution: Ensure integers are not quoted
+PROVIDER_TIMEOUT_SECONDS=60  # ✓ Correct
+PROVIDER_TIMEOUT_SECONDS="60"  # ✗ May cause issues
+```
+
+## Next Steps
+
+- Learn about the [Configuration System](/deployment/configuration) architecture
+- Follow the [Docker Deployment](/deployment/docker) guide
+- Explore the [API Reference](/api/chat) to use your configured gateway

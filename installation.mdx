@@ -1,0 +1,474 @@
+---
+title: Installation
+description: Comprehensive installation and configuration guide for LLM Gateway Core
+---
+
+## System Requirements
+
+### Software Prerequisites
+
+- **Docker**: Version 20.10 or higher
+- **Docker Compose**: Version 2.0 or higher
+- **Python**: 3.13+ (for local development)
+- **Git**: For cloning the repository
+
+### Provider Requirements
+
+<CardGroup cols={2}>
+  <Card title="Google Gemini (Cloud)" icon="cloud">
+    API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+  </Card>
+  <Card title="Ollama (Local)" icon="server">
+    Local Ollama instance running on port 11434
+  </Card>
+</CardGroup>
+
+## Installation Methods
+
+### Docker Compose (Recommended)
+
+Docker Compose provides the fastest path to a production-ready deployment with all dependencies included.
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/yourusername/llm-gateway-core.git
+    cd llm-gateway-core
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env` file in the project root:
+
+    ```bash .env
+    # Provider Configuration
+    PROVIDER_TIMEOUT_SECONDS=60
+    PROVIDER_MAX_RETRIES=3
+    GEMINI_API_KEY=your_gemini_api_key_here
+    
+    # Redis Configuration
+    REDIS_URL=redis://redis:6379/0
+    
+    # Ollama Configuration
+    OLLAMA_BASE_URL=http://host.docker.internal:11434
+    
+    # API Authentication
+    API_KEYS=sk-gateway-123,sk-gateway-456
+    
+    # Rate Limiting
+    RATE_LIMITER_CAPACITY=5
+    RATE_LIMITER_REFILL_RATE=1
+    
+    # Cache Configuration
+    CACHE_TTL_SECONDS=60
+    ```
+
+    <Warning>
+      **Security Best Practices**:
+      - Never commit `.env` files to version control
+      - Use strong, unique API keys in production
+      - Rotate API keys regularly
+      - Restrict network access to internal services
+    </Warning>
+  </Step>
+
+  <Step title="Deploy the stack">
+    Start all services:
+
+    ```bash
+    docker-compose up -d --build
+    ```
+
+    This deploys:
+    - **gateway**: FastAPI application (port 8000)
+    - **redis**: Cache and rate limiter (port 6380)
+    - **prometheus**: Metrics collection (port 9090)
+    - **grafana**: Monitoring dashboards (port 3000)
+    - **frontend**: Streamlit UI (port 8501)
+  </Step>
+
+  <Step title="Verify deployment">
+    Check service health:
+
+    ```bash
+    # Check all containers are running
+    docker-compose ps
+    
+    # Test gateway health endpoint
+    curl http://localhost:8000/api/v1/health
+    
+    # Check Redis connectivity
+    docker-compose exec redis redis-cli ping
+    ```
+  </Step>
+</Steps>
+
+### Local Development Setup
+
+For development and debugging, you can run the gateway locally without Docker.
+
+<Steps>
+  <Step title="Install Python dependencies">
+    The project uses Python 3.13 and manages dependencies via `pyproject.toml`:
+
+    ```bash
+    # Create virtual environment
+    python -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    
+    # Install dependencies
+    pip install -e .
+    ```
+
+    Core dependencies:
+    ```toml
+    fastapi>=0.125.0
+    uvicorn>=0.38.0
+    pydantic-settings>=2.7.0
+    redis>=5.0.1
+    google-generativeai>=0.8.3
+    httpx>=0.28.1
+    prometheus-client>=0.23.1
+    streamlit>=1.41.1
+    ```
+  </Step>
+
+  <Step title="Start Redis locally">
+    The gateway requires Redis for caching and rate limiting:
+
+    ```bash
+    # Using Docker
+    docker run -d -p 6379:6379 redis:alpine
+    
+    # Or install Redis locally
+    # macOS: brew install redis && brew services start redis
+    # Linux: sudo apt-get install redis-server
+    ```
+
+    Update `.env` for local Redis:
+    ```bash
+    REDIS_URL=redis://127.0.0.1:6379/0
+    ```
+  </Step>
+
+  <Step title="Run the gateway">
+    Start the FastAPI application:
+
+    ```bash
+    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ```
+
+    The `--reload` flag enables auto-reload on code changes for development.
+  </Step>
+
+  <Step title="(Optional) Run the frontend">
+    Start the Streamlit interface in a separate terminal:
+
+    ```bash
+    streamlit run frontend/main.py --server.port=8501
+    ```
+  </Step>
+</Steps>
+
+## Configuration Reference
+
+The gateway uses Pydantic settings for configuration management, loading values from environment variables or `.env` files.
+
+### Settings Class
+
+```python app/core/config.py
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    PROVIDER_TIMEOUT_SECONDS: int = 60
+    PROVIDER_MAX_RETRIES: int = 3
+    CACHE_TTL_SECONDS: int = 60
+    RATE_LIMITER_CAPACITY: int = 5
+    RATE_LIMITER_REFILL_RATE: int = 1
+    REDIS_URL: str = "redis://127.0.0.1:6380/0"
+    GEMINI_API_KEY: str = ""
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    API_KEYS: str = "sk-gateway-123"
+```
+
+### Configuration Parameters
+
+#### Provider Settings
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `PROVIDER_TIMEOUT_SECONDS` | int | 60 | Maximum time to wait for provider response |
+| `PROVIDER_MAX_RETRIES` | int | 3 | Number of retry attempts for failed requests |
+| `GEMINI_API_KEY` | str | "" | Google Gemini API key |
+| `OLLAMA_BASE_URL` | str | http://localhost:11434 | Ollama server endpoint |
+
+#### Cache Settings
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `REDIS_URL` | str | redis://127.0.0.1:6380/0 | Redis connection string |
+| `CACHE_TTL_SECONDS` | int | 60 | Response cache lifetime in seconds |
+
+<Note>
+  In Docker deployments, use `redis://redis:6379/0` for the service name. For local development, use `redis://127.0.0.1:6379/0`.
+</Note>
+
+#### Rate Limiting Settings
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `RATE_LIMITER_CAPACITY` | int | 5 | Maximum tokens per client (burst capacity) |
+| `RATE_LIMITER_REFILL_RATE` | int | 1 | Tokens refilled per second |
+
+The rate limiter uses a **token bucket algorithm**:
+- Each client starts with `RATE_LIMITER_CAPACITY` tokens
+- Each request consumes 1 token
+- Tokens refill at `RATE_LIMITER_REFILL_RATE` per second
+- Requests fail with HTTP 429 when tokens are depleted
+
+#### Authentication Settings
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `API_KEYS` | str | sk-gateway-123 | Comma-separated list of valid API keys |
+
+<Warning>
+  All API requests must include an `X-API-Key` header matching one of the configured keys. Requests with invalid or missing keys receive HTTP 401 responses.
+</Warning>
+
+## Docker Compose Configuration
+
+The `docker-compose.yml` defines the complete service stack:
+
+```yaml docker-compose.yml
+services:
+  gateway:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:alpine
+    container_name: llm-gateway-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+  frontend:
+    build: .
+    ports:
+      - "8501:8501"
+    command: ["streamlit", "run", "frontend/main.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    depends_on:
+      - gateway
+```
+
+### Service Ports
+
+| Service | Port | Description |
+|---------|------|-------------|
+| Gateway API | 8000 | Main API endpoint |
+| Redis | 6380 | Cache and rate limiter (mapped from 6379) |
+| Prometheus | 9090 | Metrics collection |
+| Grafana | 3000 | Monitoring dashboards |
+| Streamlit | 8501 | Web interface |
+
+## Ollama Setup (Local Models)
+
+To use local models via Ollama:
+
+<Steps>
+  <Step title="Install Ollama">
+    Download and install from [ollama.ai](https://ollama.ai):
+
+    ```bash
+    # macOS/Linux
+    curl -fsSL https://ollama.ai/install.sh | sh
+    
+    # Verify installation
+    ollama --version
+    ```
+  </Step>
+
+  <Step title="Pull a model">
+    Download a model for inference:
+
+    ```bash
+    # Pull Llama 2 (7B)
+    ollama pull llama2
+    
+    # Or pull Mistral
+    ollama pull mistral
+    ```
+  </Step>
+
+  <Step title="Start Ollama server">
+    Ollama runs on port 11434 by default:
+
+    ```bash
+    ollama serve
+    ```
+
+    Test connectivity:
+    ```bash
+    curl http://localhost:11434/api/tags
+    ```
+  </Step>
+
+  <Step title="Configure gateway">
+    Update `.env` with your Ollama endpoint:
+
+    ```bash
+    # For Docker deployments (access host machine)
+    OLLAMA_BASE_URL=http://host.docker.internal:11434
+    
+    # For local development
+    OLLAMA_BASE_URL=http://localhost:11434
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The `host.docker.internal` hostname allows Docker containers to access services running on the host machine. This is automatically configured in `docker-compose.yml` via the `extra_hosts` directive.
+</Note>
+
+## Production Deployment Considerations
+
+### Security
+
+- **Use HTTPS**: Deploy behind a reverse proxy (nginx, Traefik) with TLS certificates
+- **Rotate API Keys**: Implement key rotation policies
+- **Network Isolation**: Use Docker networks to isolate services
+- **Secrets Management**: Use Docker secrets or external vaults for sensitive data
+
+### Scalability
+
+- **Horizontal Scaling**: Run multiple gateway instances behind a load balancer
+- **Redis Cluster**: Use Redis Cluster for distributed caching at scale
+- **Resource Limits**: Configure Docker memory and CPU limits
+
+```yaml
+gateway:
+  deploy:
+    replicas: 3
+    resources:
+      limits:
+        cpus: '2'
+        memory: 2G
+```
+
+### Monitoring
+
+- **Log Aggregation**: Integrate with ELK stack or similar
+- **Alerting**: Configure Prometheus alerts for critical metrics
+- **Health Checks**: Enable container health checks for orchestration
+
+### Backup and Recovery
+
+```bash
+# Backup Redis data
+docker-compose exec redis redis-cli BGSAVE
+
+# Export Grafana dashboards
+curl -X GET http://localhost:3000/api/dashboards/...
+```
+
+## Troubleshooting
+
+### Gateway fails to start
+
+**Check logs**:
+```bash
+docker-compose logs gateway
+```
+
+**Common issues**:
+- Missing `GEMINI_API_KEY` in `.env`
+- Redis connection failure
+- Port conflicts (8000 already in use)
+
+### Redis connection errors
+
+**Verify Redis is running**:
+```bash
+docker-compose ps redis
+docker-compose logs redis
+```
+
+**Test connectivity**:
+```bash
+docker-compose exec redis redis-cli ping
+# Expected: PONG
+```
+
+### Ollama connection timeout
+
+**Verify Ollama is accessible**:
+```bash
+# From host
+curl http://localhost:11434/api/tags
+
+# From Docker container
+docker-compose exec gateway curl http://host.docker.internal:11434/api/tags
+```
+
+**Check firewall rules** allowing Docker to access host services.
+
+### Rate limiting too aggressive
+
+**Adjust capacity and refill rate** in `.env`:
+```bash
+RATE_LIMITER_CAPACITY=20
+RATE_LIMITER_REFILL_RATE=5
+```
+
+**Restart gateway**:
+```bash
+docker-compose restart gateway
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="code" href="/api/chat">
+    Explore the complete API documentation
+  </Card>
+  <Card title="Configuration Guide" icon="gear" href="/deployment/configuration">
+    Advanced configuration and tuning
+  </Card>
+</CardGroup>

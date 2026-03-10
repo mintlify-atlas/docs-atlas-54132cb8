@@ -1,0 +1,422 @@
+---
+title: 'Docker Deployment'
+description: 'Complete guide to deploying LLM Gateway Core with Docker Compose'
+---
+
+## Overview
+
+LLM Gateway Core uses Docker Compose to orchestrate a complete deployment stack including the gateway API, Redis cache, monitoring tools, and frontend interface. This guide covers the full deployment process from building images to running the production stack.
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+- Docker Engine 20.10 or later
+- Docker Compose v2.0 or later
+- At least 2GB of available RAM
+- Port availability: 8000, 8501, 6380, 9090, 3000
+
+<Note>
+For local model support via Ollama, you need Ollama running on your host machine at `http://localhost:11434`
+</Note>
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone and Configure">
+    Create a `.env` file in the project root with your configuration:
+    
+    ```bash
+    cp .env.example .env
+    # Edit .env with your settings
+    ```
+    
+    See [Environment Variables](/deployment/environment-variables) for all available options.
+  </Step>
+  
+  <Step title="Build and Start Services">
+    Deploy the entire stack with a single command:
+    
+    ```bash
+    docker-compose up -d --build
+    ```
+    
+    This will start all services in detached mode and build the gateway image.
+  </Step>
+  
+  <Step title="Verify Deployment">
+    Check that all services are running:
+    
+    ```bash
+    docker-compose ps
+    ```
+    
+    Access the health endpoint:
+    
+    ```bash
+    curl http://localhost:8000/api/v1/health
+    ```
+  </Step>
+</Steps>
+
+## Service Architecture
+
+The Docker Compose stack includes five interconnected services:
+
+### Gateway Service
+
+The core FastAPI application that handles LLM requests and routing.
+
+```yaml
+gateway:
+  build: .
+  ports:
+    - "8000:8000"
+  environment:
+    - PORT=8000
+    - REDIS_URL=redis://redis:6379/0
+    - OLLAMA_BASE_URL=http://host.docker.internal:11434
+  env_file:
+    - .env
+  depends_on:
+    - redis
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 3
+```
+
+<ParamField path="ports" type="array">
+  Maps container port 8000 to host port 8000 for API access
+</ParamField>
+
+<ParamField path="extra_hosts" type="array">
+  Enables the container to access services on the host machine (required for Ollama)
+</ParamField>
+
+<ParamField path="healthcheck" type="object">
+  Monitors gateway availability every 10 seconds via the health endpoint
+</ParamField>
+
+### Redis Service
+
+Provides distributed caching and rate limiting functionality.
+
+```yaml
+redis:
+  image: redis:alpine
+  container_name: llm-gateway-redis
+  ports:
+    - "6380:6379"
+  volumes:
+    - redis_data:/data
+  healthcheck:
+    test: ["CMD", "redis-cli", "ping"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+```
+
+<ParamField path="ports" type="array">
+  Exposes Redis on host port 6380 (avoids conflicts with local Redis on 6379)
+</ParamField>
+
+<ParamField path="volumes" type="array">
+  Persists Redis data across container restarts
+</ParamField>
+
+### Prometheus Service
+
+Collects and stores metrics from the gateway.
+
+```yaml
+prometheus:
+  image: prom/prometheus:latest
+  ports:
+    - "9090:9090"
+  volumes:
+    - ./prometheus.yml:/etc/prometheus/prometheus.yml
+  command:
+    - '--config.file=/etc/prometheus/prometheus.yml'
+    - '--storage.tsdb.path=/prometheus'
+```
+
+<ParamField path="ports" type="array">
+  Web UI and API available at http://localhost:9090
+</ParamField>
+
+<ParamField path="volumes" type="array">
+  Mounts Prometheus configuration from the project directory
+</ParamField>
+
+### Grafana Service
+
+Provides visualization dashboards for monitoring.
+
+```yaml
+grafana:
+  image: grafana/grafana:latest
+  ports:
+    - "3000:3000"
+  volumes:
+    - ./grafana/provisioning:/etc/grafana/provisioning
+  environment:
+    - GF_SECURITY_ADMIN_PASSWORD=admin
+    - GF_AUTH_ANONYMOUS_ENABLED=true
+    - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+```
+
+<Warning>
+The default Grafana configuration allows anonymous admin access. Change `GF_SECURITY_ADMIN_PASSWORD` and disable anonymous access in production.
+</Warning>
+
+### Frontend Service
+
+Streamlit-based web interface for testing the gateway.
+
+```yaml
+frontend:
+  build: .
+  ports:
+    - "8501:8501"
+  command: ["streamlit", "run", "frontend/main.py", "--server.port=8501", "--server.address=0.0.0.0"]
+  depends_on:
+    - gateway
+  environment:
+    - PYTHONPATH=/app
+```
+
+## Docker Image
+
+The gateway uses a multi-stage Dockerfile optimized for production:
+
+```dockerfile
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+
+WORKDIR /app
+
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+COPY . .
+
+ENV PYTHONPATH=/app
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+### Image Features
+
+- **Base Image**: Uses uv-enabled Python 3.13 slim image for fast dependency installation
+- **Build Cache**: Leverages Docker cache mounts for faster rebuilds
+- **Bytecode Compilation**: Precompiles Python for improved startup performance
+- **Production Server**: Runs with Uvicorn ASGI server for high concurrency
+
+## Volume Management
+
+The stack creates a named volume for Redis persistence:
+
+```yaml
+volumes:
+  redis_data:
+    name: llm-gateway-redis-data
+```
+
+This ensures cached responses and rate limit counters survive container restarts.
+
+### Backing Up Redis Data
+
+```bash
+# Create backup
+docker run --rm -v llm-gateway-redis-data:/data -v $(pwd):/backup \
+  alpine tar czf /backup/redis-backup.tar.gz -C /data .
+
+# Restore backup
+docker run --rm -v llm-gateway-redis-data:/data -v $(pwd):/backup \
+  alpine tar xzf /backup/redis-backup.tar.gz -C /data
+```
+
+## Service Access
+
+After deployment, access the services at:
+
+<CodeGroup>
+```bash Gateway API
+curl http://localhost:8000/api/v1/health
+```
+
+```bash Frontend UI
+open http://localhost:8501
+```
+
+```bash Grafana Dashboard
+open http://localhost:3000
+# Default credentials: admin/admin
+```
+
+```bash Prometheus
+open http://localhost:9090
+```
+</CodeGroup>
+
+## Production Considerations
+
+### Security Hardening
+
+<Warning>
+The default configuration is optimized for development. Apply these changes for production:
+</Warning>
+
+1. **Change Default Credentials**: Update Grafana admin password
+2. **Secure Redis**: Add Redis password authentication
+3. **API Key Management**: Use strong, randomly generated API keys
+4. **Disable Anonymous Access**: Remove anonymous Grafana access
+5. **Network Isolation**: Use internal Docker networks for service communication
+
+### Resource Limits
+
+Add resource constraints to prevent resource exhaustion:
+
+```yaml
+gateway:
+  deploy:
+    resources:
+      limits:
+        cpus: '1'
+        memory: 1G
+      reservations:
+        cpus: '0.5'
+        memory: 512M
+```
+
+### TLS/SSL Configuration
+
+For production deployments, add a reverse proxy (nginx/Caddy) with TLS:
+
+```yaml
+nginx:
+  image: nginx:alpine
+  ports:
+    - "443:443"
+    - "80:80"
+  volumes:
+    - ./nginx.conf:/etc/nginx/nginx.conf
+    - ./certs:/etc/nginx/certs
+  depends_on:
+    - gateway
+```
+
+### Scaling Considerations
+
+<Note>
+To scale the gateway horizontally:
+</Note>
+
+```bash
+# Scale gateway to 3 instances
+docker-compose up -d --scale gateway=3
+
+# Add load balancer for distribution
+```
+
+Ensure Redis is properly configured for distributed rate limiting across instances.
+
+## Troubleshooting
+
+### View Service Logs
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f gateway
+
+# Last 100 lines
+docker-compose logs --tail=100 gateway
+```
+
+### Restart Services
+
+```bash
+# Restart specific service
+docker-compose restart gateway
+
+# Restart all services
+docker-compose restart
+```
+
+### Health Check Status
+
+```bash
+# Check container health
+docker-compose ps
+
+# Inspect health check details
+docker inspect llm-gateway-redis | jq '.[0].State.Health'
+```
+
+### Common Issues
+
+**Gateway can't connect to Ollama**
+- Verify Ollama is running: `curl http://localhost:11434/api/tags`
+- Check `extra_hosts` configuration includes `host.docker.internal`
+- On Linux, use `--network=host` or configure proper bridge networking
+
+**Redis connection refused**
+- Ensure Redis container is healthy: `docker-compose ps redis`
+- Verify `REDIS_URL` uses correct hostname (`redis` not `localhost`)
+- Check Redis logs: `docker-compose logs redis`
+
+**Port conflicts**
+- Check if ports are already in use: `netstat -tuln | grep LISTEN`
+- Modify port mappings in docker-compose.yml if needed
+
+## Maintenance
+
+### Updating the Stack
+
+```bash
+# Pull latest changes
+git pull
+
+# Rebuild and restart
+docker-compose up -d --build
+
+# Remove old images
+docker image prune -f
+```
+
+### Clearing Cache
+
+```bash
+# Clear Redis cache
+docker-compose exec redis redis-cli FLUSHALL
+
+# Or restart Redis
+docker-compose restart redis
+```
+
+### Complete Cleanup
+
+```bash
+# Stop and remove all containers
+docker-compose down
+
+# Remove volumes (WARNING: deletes all data)
+docker-compose down -v
+
+# Remove images
+docker-compose down --rmi all
+```

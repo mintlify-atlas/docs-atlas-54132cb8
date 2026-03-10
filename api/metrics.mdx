@@ -1,0 +1,128 @@
+---
+title: "Metrics"
+api: "GET /api/v1/metrics"
+description: "Retrieve Prometheus metrics for monitoring and observability"
+---
+
+The Metrics endpoint exposes operational metrics in Prometheus format. These metrics provide insights into the gateway's performance, usage patterns, and health.
+
+## Authentication
+
+This endpoint does not require authentication and can be called without an API key. However, it is recommended to restrict access to this endpoint in production environments using network-level controls.
+
+## Response Format
+
+The endpoint returns metrics in Prometheus text-based exposition format with content type `text/plain; version=0.0.4; charset=utf-8`.
+
+## Available Metrics
+
+The gateway tracks various metrics to help you monitor its operation:
+
+### Rate Limiting Metrics
+
+<ResponseField name="rate_limit_allowed_total" type="counter">
+  Total number of requests that passed rate limiting checks. This counter increments each time a request is allowed through the rate limiter.
+</ResponseField>
+
+<ResponseField name="rate_limit_blocked_total" type="counter">
+  Total number of requests that were blocked due to rate limiting. This counter increments each time a request receives a 429 response.
+</ResponseField>
+
+### Additional Metrics
+
+The gateway also exposes standard Prometheus metrics including:
+
+- Process metrics (CPU, memory, file descriptors)
+- Python runtime metrics (GC stats, thread count)
+- HTTP request metrics (if instrumented)
+
+## Example Request
+
+```bash
+curl -X GET https://api.example.com/api/v1/metrics
+```
+
+## Example Response
+
+```prometheus
+# HELP rate_limit_allowed_total Total number of requests allowed by rate limiter
+# TYPE rate_limit_allowed_total counter
+rate_limit_allowed_total 1523.0
+
+# HELP rate_limit_blocked_total Total number of requests blocked by rate limiter
+# TYPE rate_limit_blocked_total counter
+rate_limit_blocked_total 47.0
+
+# HELP python_gc_objects_collected_total Objects collected during gc
+# TYPE python_gc_objects_collected_total counter
+python_gc_objects_collected_total{generation="0"} 12345.0
+python_gc_objects_collected_total{generation="1"} 6789.0
+python_gc_objects_collected_total{generation="2"} 123.0
+
+# HELP python_info Python platform information
+# TYPE python_info gauge
+python_info{implementation="CPython",major="3",minor="11",patchlevel="0",version="3.11.0"} 1.0
+
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 234.56
+```
+
+## Prometheus Configuration
+
+To scrape metrics from the gateway, add the following job to your `prometheus.yml` configuration:
+
+```yaml
+scrape_configs:
+  - job_name: 'llm_gateway'
+    static_configs:
+      - targets: ['gateway.example.com:8000']
+    metrics_path: '/api/v1/metrics'
+    scrape_interval: 15s
+```
+
+## Monitoring Best Practices
+
+### Rate Limiting Alerts
+
+Set up alerts to notify you when rate limiting is frequently triggered:
+
+```yaml
+groups:
+  - name: llm_gateway
+    rules:
+      - alert: HighRateLimitBlocking
+        expr: rate(rate_limit_blocked_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of rate limit blocking"
+          description: "More than 10 requests per second are being rate limited"
+```
+
+### Success Rate Monitoring
+
+Calculate the percentage of requests that pass rate limiting:
+
+```promql
+rate(rate_limit_allowed_total[5m]) / 
+(rate(rate_limit_allowed_total[5m]) + rate(rate_limit_blocked_total[5m])) * 100
+```
+
+### Dashboard Visualization
+
+Create Grafana dashboards to visualize:
+- Request throughput (allowed vs blocked)
+- Rate limiting trends over time
+- Resource utilization (CPU, memory)
+- Response latencies (if instrumented)
+
+## Security Considerations
+
+<Warning>
+  The metrics endpoint can expose sensitive operational information. In production environments:
+  - Restrict access using firewall rules or network policies
+  - Consider implementing authentication if metrics contain sensitive data
+  - Avoid exposing this endpoint to the public internet
+</Warning>

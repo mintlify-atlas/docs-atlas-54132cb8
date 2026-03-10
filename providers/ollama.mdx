@@ -1,0 +1,471 @@
+---
+title: 'Ollama Provider'
+description: 'Local Ollama integration for privacy-focused LLM deployments'
+---
+
+## Overview
+
+The **Ollama Provider** enables LLM Gateway Core to connect to a local [Ollama](https://ollama.ai) instance, providing:
+
+- **Privacy:** All data stays on your infrastructure
+- **Cost:** No API charges for inference
+- **Flexibility:** Support for multiple open-source models
+- **Control:** Full control over model versions and configurations
+
+### Features
+
+- HTTP API integration with local Ollama server
+- Dynamic model selection
+- Token usage tracking
+- Configurable timeouts
+- Default fallback to `llama3.1`
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install Ollama">
+    Download and install Ollama from [ollama.ai](https://ollama.ai)
+    
+    ```bash
+    # macOS/Linux
+    curl -fsSL https://ollama.ai/install.sh | sh
+    ```
+  </Step>
+  
+  <Step title="Pull a Model">
+    Download a model to use with the gateway:
+    
+    ```bash
+    ollama pull llama3.1
+    ```
+    
+    Other popular models:
+    - `ollama pull llama3.1:70b` - Larger, more capable
+    - `ollama pull mistral` - Fast and efficient
+    - `ollama pull codellama` - Optimized for code
+  </Step>
+  
+  <Step title="Start Ollama Server">
+    Ensure Ollama is running:
+    
+    ```bash
+    ollama serve
+    ```
+    
+    By default, Ollama listens on `http://localhost:11434`
+  </Step>
+</Steps>
+
+## Configuration
+
+### Environment Variables
+
+Configure the Ollama provider in your `.env` file:
+
+```bash .env
+OLLAMA_BASE_URL=http://localhost:11434
+PROVIDER_TIMEOUT_SECONDS=60
+```
+
+### Configuration Settings
+
+```python app/core/config.py
+class Settings(BaseSettings):
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    PROVIDER_TIMEOUT_SECONDS: int = 60
+    PROVIDER_MAX_RETRIES: int = 3
+```
+
+<Tabs>
+  <Tab title="Local Development">
+    ```bash
+    OLLAMA_BASE_URL=http://localhost:11434
+    ```
+  </Tab>
+  
+  <Tab title="Docker Compose">
+    ```bash
+    OLLAMA_BASE_URL=http://ollama:11434
+    ```
+    
+    Use the service name if Ollama runs in the same Docker network.
+  </Tab>
+  
+  <Tab title="Remote Server">
+    ```bash
+    OLLAMA_BASE_URL=http://192.168.1.100:11434
+    ```
+    
+    Point to any networked Ollama instance.
+  </Tab>
+</Tabs>
+
+## Implementation
+
+### Source Code
+
+Here's the complete implementation of the Ollama provider:
+
+```python app/providers/ollama.py
+import httpx
+from app.providers.base import LLMProvider
+from app.api.v1.schemas import ChatRequest, ChatResponse, Usage
+from app.core.config import settings
+import uuid
+
+class OllamaProvider(LLMProvider):
+    @property
+    def name(self) -> str:
+        return "ollama"
+    
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        """
+        Execute a chat completion request against a local Ollama instance.
+        """
+        url = f"{settings.OLLAMA_BASE_URL}/api/chat"
+        
+        # Convert ChatRequest messages to Ollama format
+        ollama_messages = [
+            {"role": msg.role, "content": msg.content} 
+            for msg in request.messages
+        ]
+        
+        # Determine target model
+        target_model = request.model if request.model not in ["ollama", "local", None] else "llama3.1"
+        
+        payload = {
+            "model": target_model,
+            "messages": ollama_messages,
+            "stream": False
+        }
+        
+        async with httpx.AsyncClient(timeout=settings.PROVIDER_TIMEOUT_SECONDS) as client:
+            try:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                
+                return ChatResponse(
+                    id=str(uuid.uuid4()),
+                    provider=self.name,
+                    content=data["message"]["content"],
+                    usage=Usage(
+                        prompt_tokens=data.get("prompt_eval_count", 0),
+                        completion_tokens=data.get("eval_count", 0),
+                        total_tokens=data.get("prompt_eval_count", 0) + data.get("eval_count", 0)
+                    )
+                )
+            except Exception as e:
+                print(f"[OLLAMA ERROR] {e}")
+                raise
+```
+
+### Key Implementation Details
+
+<AccordionGroup>
+  <Accordion title="Model Selection Logic">
+    The provider uses intelligent model selection:
+    
+    ```python
+    target_model = request.model if request.model not in ["ollama", "local", None] else "llama3.1"
+    ```
+    
+    - If `request.model` is a specific model name (e.g., `"mistral"`), use it
+    - If `request.model` is generic (`"ollama"`, `"local"`, `None`), default to `"llama3.1"`
+    - This allows clients to specify exact models or use routing hints
+  </Accordion>
+
+  <Accordion title="Message Format">
+    Ollama's API uses the same message format as OpenAI:
+    
+    ```python
+    {
+        "role": "user" | "assistant" | "system",
+        "content": "message text"
+    }
+    ```
+    
+    No conversion is needed - messages are passed through directly.
+  </Accordion>
+
+  <Accordion title="Token Tracking">
+    Ollama provides actual token counts:
+    
+    - `prompt_eval_count` - Tokens in the prompt
+    - `eval_count` - Tokens generated
+    - Both are included in the response for accurate usage tracking
+  </Accordion>
+
+  <Accordion title="HTTP Client">
+    Uses `httpx.AsyncClient` for async HTTP requests with:
+    - Configurable timeout via `PROVIDER_TIMEOUT_SECONDS`
+    - Automatic connection pooling
+    - HTTP status error raising with `raise_for_status()`
+  </Accordion>
+</AccordionGroup>
+
+## Usage
+
+### Routing to Ollama
+
+The gateway routes requests to Ollama when:
+
+<Tabs>
+  <Tab title="Model Hint">
+    ```json
+    {
+      "model_hint": "local",
+      "messages": [...]
+    }
+    ```
+    
+    Also accepts `"ollama"` or `"secure"` as hints.
+  </Tab>
+  
+  <Tab title="Explicit Model">
+    ```json
+    {
+      "model": "ollama",
+      "messages": [...]
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Specific Model">
+    ```json
+    {
+      "model": "mistral",
+      "messages": [...]
+    }
+    ```
+    
+    Use any model name available in your Ollama instance.
+  </Tab>
+  
+  <Tab title="Default">
+    If no model or hint is specified, Ollama is the default provider.
+  </Tab>
+</Tabs>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-gateway-123" \
+  -d '{
+    "model": "llama3.1",
+    "messages": [
+      {"role": "user", "content": "Explain quantum computing"}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 512
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "id": "b4c9d0e3-f5a6-7b8c-9d0e-1f2a3b4c5d6e",
+  "provider": "ollama",
+  "content": "Quantum computing is a revolutionary approach to computation that leverages the principles of quantum mechanics...",
+  "usage": {
+    "prompt_tokens": 15,
+    "completion_tokens": 248,
+    "total_tokens": 263
+  }
+}
+```
+
+## Available Models
+
+### Recommended Models
+
+<CardGroup cols={2}>
+  <Card title="llama3.1" icon="robot">
+    **Size:** 8B parameters (default)
+    
+    **Best For:** General conversation, Q&A
+    
+    **Speed:** Fast
+  </Card>
+  
+  <Card title="llama3.1:70b" icon="brain">
+    **Size:** 70B parameters
+    
+    **Best For:** Complex reasoning, detailed responses
+    
+    **Speed:** Slower, requires more resources
+  </Card>
+  
+  <Card title="mistral" icon="bolt">
+    **Size:** 7B parameters
+    
+    **Best For:** Efficient, fast inference
+    
+    **Speed:** Very fast
+  </Card>
+  
+  <Card title="codellama" icon="code">
+    **Size:** 7B-34B parameters
+    
+    **Best For:** Code generation and explanation
+    
+    **Speed:** Fast
+  </Card>
+</CardGroup>
+
+### Installing Models
+
+```bash
+# List available models
+ollama list
+
+# Pull a new model
+ollama pull mistral
+
+# Remove a model
+ollama rm llama3.1:70b
+```
+
+## Error Handling
+
+### Common Errors
+
+<AccordionGroup>
+  <Accordion title="Connection Refused">
+    **Error:** `httpx.ConnectError: [Errno 61] Connection refused`
+    
+    **Cause:** Ollama server is not running
+    
+    **Solution:**
+    ```bash
+    ollama serve
+    ```
+  </Accordion>
+
+  <Accordion title="Model Not Found">
+    **Error:** `model 'model-name' not found`
+    
+    **Cause:** Requested model is not installed
+    
+    **Solution:**
+    ```bash
+    ollama pull model-name
+    ```
+  </Accordion>
+
+  <Accordion title="Timeout">
+    **Error:** `httpx.TimeoutException`
+    
+    **Cause:** Request exceeded timeout limit
+    
+    **Solution:** Increase timeout in `.env`:
+    ```bash
+    PROVIDER_TIMEOUT_SECONDS=120
+    ```
+  </Accordion>
+
+  <Accordion title="Invalid Base URL">
+    **Error:** `Invalid URL`
+    
+    **Cause:** Malformed `OLLAMA_BASE_URL`
+    
+    **Solution:** Ensure URL includes protocol:
+    ```bash
+    OLLAMA_BASE_URL=http://localhost:11434
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Performance Tuning
+
+### Resource Requirements
+
+<Note>
+  Model performance depends heavily on your hardware:
+  
+  - **8B models:** 8GB+ RAM recommended
+  - **13B models:** 16GB+ RAM recommended
+  - **70B models:** 64GB+ RAM or GPU required
+</Note>
+
+### Optimization Tips
+
+<Steps>
+  <Step title="Use GPU Acceleration">
+    Ollama automatically uses GPU if available (NVIDIA, AMD, Apple Metal)
+  </Step>
+  
+  <Step title="Adjust Context Window">
+    Reduce context size for faster responses:
+    
+    ```bash
+    ollama run llama3.1 --context-length 2048
+    ```
+  </Step>
+  
+  <Step title="Pre-load Models">
+    Keep models in memory:
+    
+    ```bash
+    ollama run llama3.1 "" # Loads model without prompting
+    ```
+  </Step>
+</Steps>
+
+## Docker Deployment
+
+Running Ollama in Docker alongside the gateway:
+
+```yaml docker-compose.yml
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  
+  gateway:
+    build: .
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data:
+```
+
+<Warning>
+  GPU support in Docker requires nvidia-docker runtime for NVIDIA GPUs.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Gemini Provider" icon="google" href="/providers/gemini">
+    Compare with cloud-based Gemini
+  </Card>
+  
+  <Card title="Custom Providers" icon="code" href="/providers/custom">
+    Build your own provider
+  </Card>
+  
+  <Card title="Router Configuration" icon="route" href="/routing">
+    Configure intelligent routing
+  </Card>
+  
+  <Card title="Deployment" icon="rocket" href="/deployment/docker">
+    Production deployment guide
+  </Card>
+</CardGroup>

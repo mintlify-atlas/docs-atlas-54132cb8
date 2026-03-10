@@ -1,0 +1,449 @@
+---
+title: 'Configuration Overview'
+description: 'Understanding LLM Gateway Core configuration and settings'
+---
+
+## Overview
+
+LLM Gateway Core uses a centralized configuration system based on Pydantic Settings. All configuration is managed through environment variables, allowing for flexible deployment across different environments without code changes.
+
+## Configuration Architecture
+
+The gateway's configuration is defined in `app/core/config.py` using Pydantic's `BaseSettings` class, which provides:
+
+- **Type Safety**: Automatic validation and type conversion
+- **Default Values**: Sensible defaults for quick starts
+- **Environment Variable Loading**: Automatic `.env` file support
+- **Case Insensitivity**: Flexible environment variable naming
+
+## Settings Class
+
+All configuration is centralized in the `Settings` class:
+
+```python
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    """
+    Application settings.
+    """
+    PROVIDER_TIMEOUT_SECONDS: int = 60
+    PROVIDER_MAX_RETRIES: int = 3
+    CACHE_TTL_SECONDS: int = 60
+    RATE_LIMITER_CAPACITY: int = 5
+    RATE_LIMITER_REFILL_RATE: int = 1
+    REDIS_URL: str = "redis://127.0.0.1:6380/0"
+    GEMINI_API_KEY: str = ""
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    API_KEYS: str = "sk-gateway-123"
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = False
+```
+
+## Configuration Categories
+
+Settings are organized into functional categories:
+
+### Provider Configuration
+
+Controls how the gateway interacts with LLM providers (Gemini, Ollama).
+
+<ParamField path="PROVIDER_TIMEOUT_SECONDS" type="int" default="60">
+  Maximum time (in seconds) to wait for a provider response before timing out.
+  
+  **Use Cases:**
+  - Increase for complex queries that take longer to process
+  - Decrease for fast-fail scenarios in high-traffic environments
+</ParamField>
+
+<ParamField path="PROVIDER_MAX_RETRIES" type="int" default="3">
+  Number of retry attempts for failed provider requests.
+  
+  **Behavior:**
+  - Applies exponential backoff between retries
+  - Only retries on transient errors (timeouts, 5xx responses)
+  - Does not retry on client errors (4xx responses)
+</ParamField>
+
+### Cache Configuration
+
+Manages the distributed Redis cache for storing provider responses.
+
+<ParamField path="CACHE_TTL_SECONDS" type="int" default="60">
+  Time-to-live for cached responses in seconds.
+  
+  **Considerations:**
+  - Longer TTL reduces API costs but may serve stale responses
+  - Shorter TTL ensures fresher responses but increases provider load
+  - Set to 0 to disable caching (not recommended for production)
+</ParamField>
+
+<ParamField path="REDIS_URL" type="str" default="redis://127.0.0.1:6380/0">
+  Connection string for the Redis instance.
+  
+  **Format:**
+  ```
+  redis://[username:password@]host:port/database
+  ```
+  
+  **Examples:**
+  ```bash
+  # Local development
+  REDIS_URL=redis://127.0.0.1:6380/0
+  
+  # Docker Compose
+  REDIS_URL=redis://redis:6379/0
+  
+  # With authentication
+  REDIS_URL=redis://:mypassword@redis:6379/0
+  
+  # Redis Cluster
+  REDIS_URL=redis://redis-cluster:6379/0
+  ```
+</ParamField>
+
+### Rate Limiting Configuration
+
+Implements token bucket rate limiting to prevent abuse.
+
+<ParamField path="RATE_LIMITER_CAPACITY" type="int" default="5">
+  Maximum number of tokens in the rate limiter bucket.
+  
+  **Behavior:**
+  - Each request consumes one token
+  - Clients can burst up to this many requests immediately
+  - Once depleted, clients must wait for token refill
+</ParamField>
+
+<ParamField path="RATE_LIMITER_REFILL_RATE" type="int" default="1">
+  Number of tokens added to the bucket per second.
+  
+  **Examples:**
+  - `RATE_LIMITER_REFILL_RATE=1`: 1 request per second sustained
+  - `RATE_LIMITER_REFILL_RATE=10`: 10 requests per second sustained
+  - `RATE_LIMITER_CAPACITY=100` with `REFILL_RATE=10`: 100 request burst, then 10/sec
+</ParamField>
+
+### Provider Integration
+
+Configures specific provider endpoints and credentials.
+
+<ParamField path="GEMINI_API_KEY" type="str" default="">
+  API key for Google Gemini integration.
+  
+  **Obtaining a Key:**
+  1. Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
+  2. Create a new API key
+  3. Set the key in your environment
+  
+  <Warning>
+  Never commit API keys to version control. Use environment variables or secrets management.
+  </Warning>
+</ParamField>
+
+<ParamField path="OLLAMA_BASE_URL" type="str" default="http://localhost:11434">
+  Base URL for the Ollama API endpoint.
+  
+  **Configuration by Environment:**
+  
+  **Local Development:**
+  ```bash
+  OLLAMA_BASE_URL=http://localhost:11434
+  ```
+  
+  **Docker Compose (accessing host Ollama):**
+  ```bash
+  OLLAMA_BASE_URL=http://host.docker.internal:11434
+  ```
+  
+  **Remote Ollama Server:**
+  ```bash
+  OLLAMA_BASE_URL=http://ollama.example.com:11434
+  ```
+  
+  <Note>
+  Ensure Ollama is running and accessible at this URL. Test with: `curl $OLLAMA_BASE_URL/api/tags`
+  </Note>
+</ParamField>
+
+### Authentication
+
+Manages API key-based authentication for gateway access.
+
+<ParamField path="API_KEYS" type="str" default="sk-gateway-123">
+  Comma-separated list of valid API keys for gateway authentication.
+  
+  **Format:**
+  ```bash
+  API_KEYS=sk-gateway-123,sk-prod-456,sk-dev-789
+  ```
+  
+  **Usage:**
+  Clients must include one of these keys in the `Authorization` header:
+  ```bash
+  curl -H "Authorization: Bearer sk-gateway-123" \
+    http://localhost:8000/api/v1/chat/completions
+  ```
+  
+  <Warning>
+  Use strong, randomly generated keys in production:
+  ```bash
+  # Generate secure keys
+  openssl rand -hex 32
+  ```
+  </Warning>
+</ParamField>
+
+## Environment-Specific Configuration
+
+The gateway supports different configuration profiles for various environments.
+
+### Development Environment
+
+Optimized for local development and testing:
+
+```bash .env.development
+PROVIDER_TIMEOUT_SECONDS=30
+PROVIDER_MAX_RETRIES=2
+CACHE_TTL_SECONDS=300
+RATE_LIMITER_CAPACITY=100
+RATE_LIMITER_REFILL_RATE=10
+REDIS_URL=redis://127.0.0.1:6380/0
+GEMINI_API_KEY=your_dev_key
+OLLAMA_BASE_URL=http://localhost:11434
+API_KEYS=sk-dev-test-123
+```
+
+### Docker Compose Environment
+
+Configured for the full Docker stack:
+
+```bash .env.docker
+PROVIDER_TIMEOUT_SECONDS=60
+PROVIDER_MAX_RETRIES=3
+CACHE_TTL_SECONDS=60
+RATE_LIMITER_CAPACITY=10
+RATE_LIMITER_REFILL_RATE=2
+REDIS_URL=redis://redis:6379/0
+GEMINI_API_KEY=your_api_key
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+API_KEYS=sk-gateway-prod-xyz
+```
+
+### Production Environment
+
+Hardened settings for production deployment:
+
+```bash .env.production
+PROVIDER_TIMEOUT_SECONDS=45
+PROVIDER_MAX_RETRIES=3
+CACHE_TTL_SECONDS=300
+RATE_LIMITER_CAPACITY=5
+RATE_LIMITER_REFILL_RATE=1
+REDIS_URL=redis://:strong_password@redis-prod:6379/0
+GEMINI_API_KEY=prod_api_key_from_secrets_manager
+OLLAMA_BASE_URL=http://ollama-prod.internal:11434
+API_KEYS=sk-prod-secure-key-1,sk-prod-secure-key-2
+```
+
+<Warning>
+In production, use a secrets management system (AWS Secrets Manager, HashiCorp Vault, etc.) instead of `.env` files.
+</Warning>
+
+## Configuration Loading
+
+The gateway loads configuration in the following order (later sources override earlier ones):
+
+1. **Default Values**: Hardcoded in the `Settings` class
+2. **Environment Variables**: System environment variables
+3. **.env File**: Values from `.env` file in the project root
+4. **Runtime Overrides**: Explicitly set values at runtime
+
+### Loading Process
+
+```python
+# app/core/config.py
+settings = Settings()
+```
+
+Pydantic automatically:
+1. Reads the `.env` file
+2. Loads environment variables
+3. Validates types and constraints
+4. Provides the global `settings` instance
+
+## Configuration Validation
+
+Pydantic performs automatic validation on initialization:
+
+### Type Validation
+
+```python
+# Valid: string parsed to int
+PROVIDER_TIMEOUT_SECONDS=60  # ✓
+
+# Invalid: cannot parse to int
+PROVIDER_TIMEOUT_SECONDS=invalid  # ✗ ValidationError
+```
+
+### URL Validation
+
+```python
+# Valid Redis URLs
+REDIS_URL=redis://localhost:6379/0  # ✓
+REDIS_URL=redis://:password@host:6379/1  # ✓
+
+# Invalid format
+REDIS_URL=not-a-url  # ✗ May cause connection errors
+```
+
+## Runtime Configuration Access
+
+Access configuration throughout the application:
+
+```python
+from app.core.config import settings
+
+# Access individual settings
+timeout = settings.PROVIDER_TIMEOUT_SECONDS
+redis_url = settings.REDIS_URL
+
+# Use in application logic
+if settings.GEMINI_API_KEY:
+    # Initialize Gemini provider
+    pass
+```
+
+## Configuration Best Practices
+
+<Note>
+Follow these guidelines for robust configuration management:
+</Note>
+
+### 1. Never Commit Secrets
+
+```bash .gitignore
+# Always ignore environment files
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+```
+
+### 2. Use Strong API Keys
+
+```bash
+# Generate cryptographically secure keys
+openssl rand -base64 32
+
+# Or use Python
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+### 3. Document Required Variables
+
+Provide an example configuration file:
+
+```bash .env.example
+# Provider Configuration
+PROVIDER_TIMEOUT_SECONDS=60
+PROVIDER_MAX_RETRIES=3
+
+# Cache Configuration
+CACHE_TTL_SECONDS=60
+REDIS_URL=redis://localhost:6379/0
+
+# Rate Limiting
+RATE_LIMITER_CAPACITY=5
+RATE_LIMITER_REFILL_RATE=1
+
+# Provider API Keys
+GEMINI_API_KEY=your_gemini_api_key_here
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Authentication
+API_KEYS=sk-gateway-123
+```
+
+### 4. Validate on Startup
+
+The gateway automatically validates configuration during initialization. Failed validation prevents startup, ensuring invalid configurations are caught early.
+
+### 5. Use Environment-Specific Files
+
+```bash
+# Development
+export ENV=development
+cp .env.development .env
+
+# Production
+export ENV=production
+cp .env.production .env
+```
+
+## Monitoring Configuration
+
+Log the active configuration (excluding secrets) on startup:
+
+```python
+from app.core.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
+logger.info(f"Provider timeout: {settings.PROVIDER_TIMEOUT_SECONDS}s")
+logger.info(f"Cache TTL: {settings.CACHE_TTL_SECONDS}s")
+logger.info(f"Rate limit: {settings.RATE_LIMITER_CAPACITY} capacity, {settings.RATE_LIMITER_REFILL_RATE}/s refill")
+logger.info(f"Redis URL: {settings.REDIS_URL.split('@')[-1]}")  # Hide password
+logger.info(f"Gemini API key configured: {bool(settings.GEMINI_API_KEY)}")
+```
+
+## Troubleshooting
+
+### Configuration Not Loading
+
+**Issue**: Changes to `.env` not reflected in the application.
+
+**Solutions:**
+1. Restart the application (settings load once at startup)
+2. Verify `.env` file location (must be in project root)
+3. Check for typos in variable names (case-insensitive but must match)
+
+### Type Validation Errors
+
+**Issue**: `ValidationError` on startup.
+
+**Solutions:**
+1. Check environment variable types match the schema
+2. Remove quotes around numeric values
+3. Verify URL formats for `REDIS_URL` and `OLLAMA_BASE_URL`
+
+### Redis Connection Failed
+
+**Issue**: Cannot connect to Redis despite correct `REDIS_URL`.
+
+**Solutions:**
+1. Verify Redis is running: `redis-cli ping`
+2. Check hostname (use `redis` in Docker, `localhost` locally)
+3. Verify port availability: `telnet localhost 6379`
+4. Check Redis logs for authentication errors
+
+### Provider Authentication Failed
+
+**Issue**: Gemini returns 401 or 403 errors.
+
+**Solutions:**
+1. Verify `GEMINI_API_KEY` is set correctly
+2. Check for leading/trailing whitespace
+3. Ensure the API key is active in Google Cloud Console
+4. Verify API quotas and billing are configured
+
+## Next Steps
+
+- See [Environment Variables](/deployment/environment-variables) for the complete reference
+- Learn about [Docker Deployment](/deployment/docker) for containerized setup
+- Review the [API Reference](/api/chat) for using the configured gateway

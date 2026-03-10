@@ -1,0 +1,608 @@
+---
+title: 'Custom Providers'
+description: 'Build and integrate custom LLM providers into the gateway'
+---
+
+## Overview
+
+LLM Gateway Core's extensible architecture makes it easy to add support for any LLM provider. Whether you're integrating:
+
+- A commercial API (OpenAI, Anthropic, Cohere)
+- A self-hosted model server
+- An internal ML platform
+- A custom inference engine
+
+This guide will walk you through the complete process.
+
+## Architecture Review
+
+Every provider must:
+
+1. **Inherit** from `LLMProvider` abstract base class
+2. **Implement** the `chat()` async method
+3. **Define** the `name` property
+4. **Return** a standardized `ChatResponse`
+5. **Register** with the `Router`
+
+## Step-by-Step Implementation
+
+<Steps>
+  <Step title="Create Provider Class">
+    Create a new file in `app/providers/` for your provider:
+    
+    ```python app/providers/custom.py
+    from app.providers.base import LLMProvider
+    from app.api.v1.schemas import ChatRequest, ChatResponse, Usage
+    import uuid
+    
+    class CustomProvider(LLMProvider):
+        @property
+        def name(self) -> str:
+            return "custom"
+        
+        async def chat(self, request: ChatRequest) -> ChatResponse:
+            # Implementation goes here
+            pass
+    ```
+  </Step>
+  
+  <Step title="Implement chat() Method">
+    Add your provider's logic to handle chat requests:
+    
+    ```python
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        # 1. Extract request parameters
+        messages = request.messages
+        model = request.model or "default-model"
+        temperature = request.temperature
+        max_tokens = request.max_tokens
+        
+        # 2. Call your provider's API
+        # (implementation depends on your provider)
+        
+        # 3. Return standardized response
+        return ChatResponse(
+            id=str(uuid.uuid4()),
+            provider=self.name,
+            content="Generated response text",
+            usage=Usage(
+                prompt_tokens=10,
+                completion_tokens=20,
+                total_tokens=30
+            )
+        )
+    ```
+  </Step>
+  
+  <Step title="Add Configuration">
+    Add any required settings to `app/core/config.py`:
+    
+    ```python app/core/config.py
+    class Settings(BaseSettings):
+        # Existing settings...
+        
+        # Your provider's configuration
+        CUSTOM_API_KEY: str = ""
+        CUSTOM_API_BASE_URL: str = "https://api.example.com"
+        CUSTOM_DEFAULT_MODEL: str = "model-v1"
+    ```
+  </Step>
+  
+  <Step title="Register Provider">
+    Add your provider to the router in `app/core/router.py`:
+    
+    ```python app/core/router.py
+    from app.providers.custom import CustomProvider
+    
+    class Router:
+        def __init__(self):
+            self.providers = {
+                "gemini": GeminiProvider(),
+                "ollama": OllamaProvider(),
+                "custom": CustomProvider(),  # Add your provider
+            }
+        
+        def route(self, request) -> List[LLMProvider]:
+            target = request.model or request.model_hint
+            
+            # Add routing logic for your provider
+            if target == "custom":
+                return [self.providers["custom"]]
+            
+            # Existing routing logic...
+    ```
+  </Step>
+</Steps>
+
+## Complete Examples
+
+### Example 1: OpenAI Provider
+
+Here's a complete implementation for OpenAI's API:
+
+```python app/providers/openai.py
+import httpx
+from app.providers.base import LLMProvider
+from app.api.v1.schemas import ChatRequest, ChatResponse, Usage
+from app.core.config import settings
+import uuid
+
+class OpenAIProvider(LLMProvider):
+    @property
+    def name(self) -> str:
+        return "openai"
+    
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        """
+        Execute chat completion via OpenAI API.
+        """
+        url = "https://api.openai.com/v1/chat/completions"
+        
+        # Convert messages to OpenAI format
+        openai_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in request.messages
+        ]
+        
+        # Build request payload
+        payload = {
+            "model": request.model or "gpt-4",
+            "messages": openai_messages,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "stream": False
+        }
+        
+        # Make API request
+        headers = {
+            "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        async with httpx.AsyncClient(timeout=settings.PROVIDER_TIMEOUT_SECONDS) as client:
+            try:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extract response
+                choice = data["choices"][0]
+                usage = data["usage"]
+                
+                return ChatResponse(
+                    id=data.get("id", str(uuid.uuid4())),
+                    provider=self.name,
+                    content=choice["message"]["content"],
+                    usage=Usage(
+                        prompt_tokens=usage["prompt_tokens"],
+                        completion_tokens=usage["completion_tokens"],
+                        total_tokens=usage["total_tokens"]
+                    )
+                )
+            except httpx.HTTPStatusError as e:
+                print(f"[OpenAI HTTP Error] {e.response.status_code}: {e.response.text}")
+                raise
+            except Exception as e:
+                print(f"[OpenAI Error] {e}")
+                raise
+```
+
+### Example 2: Anthropic Claude Provider
+
+```python app/providers/anthropic.py
+import httpx
+from app.providers.base import LLMProvider
+from app.api.v1.schemas import ChatRequest, ChatResponse, Usage, Message
+from app.core.config import settings
+import uuid
+
+class AnthropicProvider(LLMProvider):
+    @property
+    def name(self) -> str:
+        return "anthropic"
+    
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        """
+        Execute chat completion via Anthropic API.
+        """
+        url = "https://api.anthropic.com/v1/messages"
+        
+        # Anthropic requires system messages separately
+        system_messages = [msg.content for msg in request.messages if msg.role == "system"]
+        conversation_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in request.messages
+            if msg.role != "system"
+        ]
+        
+        payload = {
+            "model": request.model or "claude-3-5-sonnet-20241022",
+            "max_tokens": request.max_tokens or 1024,
+            "messages": conversation_messages,
+        }
+        
+        # Add system message if present
+        if system_messages:
+            payload["system"] = " ".join(system_messages)
+        
+        headers = {
+            "x-api-key": settings.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+        
+        async with httpx.AsyncClient(timeout=settings.PROVIDER_TIMEOUT_SECONDS) as client:
+            try:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                
+                return ChatResponse(
+                    id=data.get("id", str(uuid.uuid4())),
+                    provider=self.name,
+                    content=data["content"][0]["text"],
+                    usage=Usage(
+                        prompt_tokens=data["usage"]["input_tokens"],
+                        completion_tokens=data["usage"]["output_tokens"],
+                        total_tokens=data["usage"]["input_tokens"] + data["usage"]["output_tokens"]
+                    )
+                )
+            except Exception as e:
+                print(f"[Anthropic Error] {e}")
+                raise
+```
+
+### Example 3: Mock Provider for Testing
+
+```python app/providers/mock.py
+import asyncio
+from app.providers.base import LLMProvider
+from app.api.v1.schemas import ChatRequest, ChatResponse, Usage
+import uuid
+
+class MockProvider(LLMProvider):
+    """
+    Mock provider for testing without external API calls.
+    """
+    
+    @property
+    def name(self) -> str:
+        return "mock"
+    
+    async def chat(self, request: ChatRequest) -> ChatResponse:
+        # Simulate API latency
+        await asyncio.sleep(0.1)
+        
+        # Generate a mock response
+        last_message = request.messages[-1].content
+        mock_content = f"Mock response to: {last_message[:50]}..."
+        
+        return ChatResponse(
+            id=str(uuid.uuid4()),
+            provider=self.name,
+            content=mock_content,
+            usage=Usage(
+                prompt_tokens=len(last_message.split()),
+                completion_tokens=len(mock_content.split()),
+                total_tokens=len(last_message.split()) + len(mock_content.split())
+            )
+        )
+```
+
+## Message Format Conversion
+
+Different providers expect different message formats. Here are common patterns:
+
+<Tabs>
+  <Tab title="OpenAI Format">
+    ```python
+    # Standard format used by OpenAI, Ollama, and many others
+    {
+        "role": "user" | "assistant" | "system",
+        "content": "message text"
+    }
+    ```
+    
+    No conversion needed from `ChatRequest.messages`.
+  </Tab>
+  
+  <Tab title="Gemini Format">
+    ```python
+    # Google Gemini uses "model" instead of "assistant"
+    {
+        "role": "user" | "model",
+        "parts": [{"text": "message text"}]
+    }
+    ```
+    
+    Conversion required:
+    ```python
+    history = []
+    for msg in request.messages:
+        role = "user" if msg.role == "user" else "model"
+        history.append({
+            "role": role,
+            "parts": [{"text": msg.content}]
+        })
+    ```
+  </Tab>
+  
+  <Tab title="Anthropic Format">
+    ```python
+    # Anthropic separates system messages
+    {
+        "system": "system prompt",  # Separate field
+        "messages": [
+            {"role": "user", "content": "..."}
+        ]
+    }
+    ```
+    
+    Conversion required:
+    ```python
+    system = [msg.content for msg in request.messages if msg.role == "system"]
+    messages = [
+        {"role": msg.role, "content": msg.content}
+        for msg in request.messages if msg.role != "system"
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+## Error Handling Best Practices
+
+<CodeGroup>
+```python Basic Error Handling
+async def chat(self, request: ChatRequest) -> ChatResponse:
+    try:
+        # API call
+        response = await self.call_api(request)
+        return self.parse_response(response)
+    except Exception as e:
+        print(f"[{self.name.upper()} ERROR] {e}")
+        raise
+```
+
+```python Detailed Error Handling
+import traceback
+from typing import Dict, Any
+
+async def chat(self, request: ChatRequest) -> ChatResponse:
+    try:
+        response = await self.call_api(request)
+        return self.parse_response(response)
+    except httpx.HTTPStatusError as e:
+        # HTTP errors with status codes
+        print(f"[{self.name.upper()} HTTP {e.response.status_code}] {e.response.text}")
+        raise
+    except httpx.TimeoutException:
+        # Timeout errors
+        print(f"[{self.name.upper()} TIMEOUT] Request exceeded timeout")
+        raise
+    except KeyError as e:
+        # Response parsing errors
+        print(f"[{self.name.upper()} PARSE ERROR] Missing key: {e}")
+        raise
+    except Exception as e:
+        # Catch-all with traceback
+        print(f"[{self.name.upper()} ERROR]\n{traceback.format_exc()}")
+        raise
+```
+
+```python Retry Logic
+import asyncio
+from app.core.config import settings
+
+async def chat(self, request: ChatRequest) -> ChatResponse:
+    last_error = None
+    
+    for attempt in range(settings.PROVIDER_MAX_RETRIES):
+        try:
+            response = await self.call_api(request)
+            return self.parse_response(response)
+        except httpx.TimeoutException as e:
+            last_error = e
+            if attempt < settings.PROVIDER_MAX_RETRIES - 1:
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                continue
+        except Exception as e:
+            # Don't retry on non-timeout errors
+            raise
+    
+    # All retries exhausted
+    raise last_error
+```
+</CodeGroup>
+
+## Testing Your Provider
+
+### Unit Tests
+
+Create tests for your provider:
+
+```python tests/test_providers/test_custom.py
+import pytest
+from app.providers.custom import CustomProvider
+from app.api.v1.schemas import ChatRequest, Message
+
+@pytest.mark.asyncio
+async def test_custom_provider_chat():
+    provider = CustomProvider()
+    
+    request = ChatRequest(
+        messages=[
+            Message(role="user", content="Hello, world!")
+        ],
+        model="default"
+    )
+    
+    response = await provider.chat(request)
+    
+    assert response.provider == "custom"
+    assert response.content is not None
+    assert response.usage.total_tokens > 0
+
+@pytest.mark.asyncio
+async def test_custom_provider_error_handling():
+    provider = CustomProvider()
+    
+    # Test with invalid request
+    request = ChatRequest(messages=[])
+    
+    with pytest.raises(Exception):
+        await provider.chat(request)
+```
+
+### Integration Tests
+
+```python tests/integration/test_custom_provider.py
+import pytest
+from httpx import AsyncClient
+from app.main import app
+
+@pytest.mark.asyncio
+async def test_custom_provider_via_api():
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/v1/chat",
+            headers={"Authorization": "Bearer sk-gateway-123"},
+            json={
+                "model": "custom",
+                "messages": [
+                    {"role": "user", "content": "Test message"}
+                ]
+            }
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["provider"] == "custom"
+```
+
+## Configuration Checklist
+
+<Steps>
+  <Step title="Environment Variables">
+    Add all required settings to `.env`:
+    
+    ```bash .env
+    CUSTOM_API_KEY=your-api-key
+    CUSTOM_BASE_URL=https://api.example.com
+    ```
+  </Step>
+  
+  <Step title="Settings Class">
+    Update `app/core/config.py` with typed settings:
+    
+    ```python
+    class Settings(BaseSettings):
+        CUSTOM_API_KEY: str = ""
+        CUSTOM_BASE_URL: str = "https://api.example.com"
+    ```
+  </Step>
+  
+  <Step title="Provider Registration">
+    Add to `Router` in `app/core/router.py`
+  </Step>
+  
+  <Step title="Routing Logic">
+    Define when your provider should be used
+  </Step>
+  
+  <Step title="Documentation">
+    Document your provider's configuration and usage
+  </Step>
+</Steps>
+
+<Warning>
+  Always validate that required configuration is present before making API calls. Fail fast with clear error messages.
+</Warning>
+
+## Advanced Features
+
+### Streaming Support
+
+If your provider supports streaming:
+
+```python
+async def chat_stream(self, request: ChatRequest):
+    """
+    Stream chat responses token by token.
+    """
+    # Implementation depends on your provider's streaming API
+    async for chunk in self.stream_api_call(request):
+        yield chunk
+```
+
+### Model Introspection
+
+Provide a method to list available models:
+
+```python
+async def list_models(self) -> List[str]:
+    """
+    Return a list of available models.
+    """
+    return ["model-v1", "model-v2", "model-v3"]
+```
+
+### Custom Parameters
+
+Extend `ChatRequest` if you need custom parameters:
+
+```python app/api/v1/schemas.py
+class ChatRequest(BaseModel):
+    # Standard fields...
+    
+    # Custom provider-specific parameters
+    custom_param: Optional[str] = None
+    top_k: Optional[int] = None
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Provider not being called">
+    - Check that provider is registered in `Router.providers`
+    - Verify routing logic includes your provider
+    - Test with explicit model name in request
+  </Accordion>
+
+  <Accordion title="Import errors">
+    - Ensure all dependencies are in `requirements.txt`
+    - Run `pip install -r requirements.txt`
+    - Check Python import paths
+  </Accordion>
+
+  <Accordion title="Authentication failures">
+    - Verify environment variables are loaded
+    - Check API key format and validity
+    - Review provider's authentication documentation
+  </Accordion>
+
+  <Accordion title="Response parsing errors">
+    - Log the raw API response for debugging
+    - Validate response structure matches expectations
+    - Handle missing or null fields gracefully
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Provider Overview" icon="layer-group" href="/providers/overview">
+    Review provider architecture
+  </Card>
+  
+  <Card title="Router Configuration" icon="route" href="/routing">
+    Configure intelligent routing
+  </Card>
+  
+  <Card title="Testing Guide" icon="flask" href="/providers/custom">
+    Write tests for your provider
+  </Card>
+  
+  <Card title="Deployment" icon="rocket" href="/deployment/docker">
+    Deploy your custom provider
+  </Card>
+</CardGroup>

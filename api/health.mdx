@@ -1,0 +1,79 @@
+---
+title: "Health Check"
+api: "GET /api/v1/health"
+description: "Check the health status of the LLM gateway service"
+---
+
+The Health endpoint provides a simple way to verify that the gateway service is operational. This endpoint is useful for monitoring, load balancer health checks, and service discovery.
+
+## Authentication
+
+This endpoint does not require authentication and can be called without an API key.
+
+## Response
+
+<ResponseField name="status" type="string" required>
+  The health status of the service. Returns `"ok"` when the service is operational.
+</ResponseField>
+
+## Example Request
+
+```bash
+curl -X GET https://api.example.com/api/v1/health
+```
+
+## Example Response
+
+```json
+{
+  "status": "ok"
+}
+```
+
+## Use Cases
+
+### Load Balancer Health Checks
+
+Configure your load balancer to periodically call this endpoint to determine if the gateway instance is healthy and should receive traffic.
+
+```bash
+# Example health check configuration for HAProxy
+http-check send meth GET uri /api/v1/health
+http-check expect status 200
+```
+
+### Monitoring and Alerting
+
+Integrate this endpoint into your monitoring system to track service availability.
+
+```bash
+# Example Prometheus blackbox exporter configuration
+modules:
+  http_2xx:
+    prober: http
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200]
+      method: GET
+```
+
+### Service Readiness
+
+Use this endpoint in container orchestration platforms to determine when the service is ready to accept traffic.
+
+```yaml
+# Example Kubernetes readiness probe
+readinessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+## Response Codes
+
+| Status Code | Description |
+|-------------|-------------|
+| 200 | Service is healthy and operational |
+| 5xx | Service is experiencing issues |

@@ -1,0 +1,146 @@
+---
+title: "ChatRequest"
+description: "Schema for chat completion requests"
+---
+
+## Overview
+
+The `ChatRequest` schema defines the structure for sending chat completion requests to the LLM Gateway. It includes message history, model configuration, and generation parameters.
+
+## Schema Definition
+
+<ParamField body="messages" type="array" required>
+  Array of message objects representing the conversation history.
+  
+  <Expandable title="Message Object">
+    <ResponseField name="role" type="string" required>
+      The role of the message sender. Typically `"user"` or `"assistant"`.
+    </ResponseField>
+    
+    <ResponseField name="content" type="string" required>
+      The content of the message.
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="model" type="string">
+  Optional model identifier. If not specified, the gateway will select an appropriate model based on the request.
+</ParamField>
+
+<ParamField body="model_hint" type="string">
+  Optional hint to guide model selection. Can be used to specify preferences like model family or capabilities.
+</ParamField>
+
+<ParamField body="max_tokens" type="integer" default="512">
+  Maximum number of tokens to generate in the completion. Controls the length of the response.
+</ParamField>
+
+<ParamField body="temperature" type="float" default="0.7">
+  Sampling temperature between 0 and 2. Higher values (e.g., 1.0) make output more random, while lower values (e.g., 0.2) make it more focused and deterministic.
+</ParamField>
+
+<ParamField body="stream" type="boolean" default="false">
+  Whether to stream the response. When set to `true`, tokens are sent as they are generated.
+</ParamField>
+
+## Example Request
+
+<CodeGroup>
+
+```json JSON
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the capital of France?"
+    }
+  ],
+  "model": "gpt-4",
+  "max_tokens": 512,
+  "temperature": 0.7,
+  "stream": false
+}
+```
+
+```python Python
+from llm_gateway import ChatRequest, Message
+
+request = ChatRequest(
+    messages=[
+        Message(role="user", content="What is the capital of France?")
+    ],
+    model="gpt-4",
+    max_tokens=512,
+    temperature=0.7,
+    stream=False
+)
+```
+
+```javascript JavaScript
+const request = {
+  messages: [
+    {
+      role: "user",
+      content: "What is the capital of France?"
+    }
+  ],
+  model: "gpt-4",
+  max_tokens: 512,
+  temperature: 0.7,
+  stream: false
+};
+```
+
+</CodeGroup>
+
+## Multi-Turn Conversation Example
+
+<CodeGroup>
+
+```json JSON
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the capital of France?"
+    },
+    {
+      "role": "assistant",
+      "content": "The capital of France is Paris."
+    },
+    {
+      "role": "user",
+      "content": "What is its population?"
+    }
+  ],
+  "model": "gpt-4",
+  "temperature": 0.7
+}
+```
+
+```python Python
+request = ChatRequest(
+    messages=[
+        Message(role="user", content="What is the capital of France?"),
+        Message(role="assistant", content="The capital of France is Paris."),
+        Message(role="user", content="What is its population?")
+    ],
+    model="gpt-4",
+    temperature=0.7
+)
+```
+
+</CodeGroup>
+
+## Validation Rules
+
+- `messages` array must contain at least one message
+- Each message must have both `role` and `content` fields
+- `temperature` must be between 0 and 2 (if provided)
+- `max_tokens` must be a positive integer (if provided)
+- `stream` must be a boolean value
+
+## Related Schemas
+
+- [ChatResponse](/api/schemas/chat-response) - Response schema for chat completions
+- [Errors](/api/schemas/errors) - Error response formats

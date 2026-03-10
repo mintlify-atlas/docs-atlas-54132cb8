@@ -1,0 +1,411 @@
+---
+title: Metrics Reference
+description: Complete reference of all Prometheus metrics exposed by LLM Gateway
+---
+
+LLM Gateway exposes Prometheus metrics that track caching performance, provider interactions, gateway performance, and rate limiting. All metrics are defined in `app/core/metrics.py`.
+
+## Metric Types
+
+The gateway uses three Prometheus metric types:
+
+<CardGroup cols={3}>
+  <Card title="Counter" icon="arrow-up">
+    Monotonically increasing value that only goes up (resets on restart)
+  </Card>
+  <Card title="Histogram" icon="chart-histogram">
+    Samples observations and counts them in configurable buckets
+  </Card>
+  <Card title="Gauge" icon="gauge">
+    Value that can go up or down representing current state
+  </Card>
+</CardGroup>
+
+## Cache Metrics
+
+Metrics tracking the performance of the Redis-based response cache.
+
+### cache_hits_total
+
+<ParamField path="Type" type="Counter">
+  Counts the total number of successful cache hits
+</ParamField>
+
+**Description**: Incremented when a request finds a matching cached response and returns it without calling the provider.
+
+**When incremented**: Every time `cache_middleware.py` finds a valid cached entry for a request.
+
+**Usage example**:
+```python
+from app.core.metrics import CACHE_HITS
+
+CACHE_HITS.inc()  # Increment by 1
+```
+
+**PromQL queries**:
+```promql
+# Total cache hits
+cache_hits_total
+
+# Cache hit rate over 5 minutes
+rate(cache_hits_total[5m])
+```
+
+### cache_misses_total
+
+<ParamField path="Type" type="Counter">
+  Counts the total number of cache misses
+</ParamField>
+
+**Description**: Incremented when a request does not find a cached response and must call the provider.
+
+**When incremented**: Every time `cache_middleware.py` fails to find a cached entry for a request.
+
+**PromQL queries**:
+```promql
+# Cache hit ratio (percentage)
+100 * cache_hits_total / (cache_hits_total + cache_misses_total)
+
+# Cache miss rate over 5 minutes
+rate(cache_misses_total[5m])
+```
+
+<Tip>
+  Monitor the cache hit ratio to optimize caching strategy. A low ratio may indicate:
+  - Cache TTL is too short
+  - Requests are highly variable
+  - Cache key generation needs refinement
+</Tip>
+
+## Provider Metrics
+
+Metrics tracking interactions with LLM providers (OpenAI, Anthropic, Ollama, etc.).
+
+### provider_calls_total
+
+<ParamField path="Type" type="Counter">
+  Counts total provider API calls
+</ParamField>
+
+<ParamField path="Labels" type="array">
+  - `provider` - Provider name (e.g., "openai", "anthropic", "ollama")
+</ParamField>
+
+**Description**: Incremented each time the gateway makes a call to a provider's API.
+
+**When incremented**: Every successful or failed provider API call.
+
+**PromQL queries**:
+```promql
+# Total calls by provider
+sum by (provider) (provider_calls_total)
+
+# Call rate per provider (last 5 minutes)
+rate(provider_calls_total[5m])
+
+# OpenAI specific calls
+provider_calls_total{provider="openai"}
+```
+
+### provider_failures_total
+
+<ParamField path="Type" type="Counter">
+  Counts failed provider API calls
+</ParamField>
+
+<ParamField path="Labels" type="array">
+  - `provider` - Provider name (e.g., "openai", "anthropic", "ollama")
+</ParamField>
+
+**Description**: Incremented when a provider API call fails due to errors, timeouts, or rate limits.
+
+**When incremented**: On any provider error response or exception during API call.
+
+**PromQL queries**:
+```promql
+# Failure rate by provider
+rate(provider_failures_total[5m])
+
+# Error percentage by provider
+100 * provider_failures_total / provider_calls_total
+
+# Providers with errors in last hour
+provider_failures_total > 0
+```
+
+<Warning>
+  A high failure rate may indicate:
+  - Provider API outages
+  - Invalid API keys
+  - Rate limit exhaustion
+  - Network connectivity issues
+</Warning>
+
+### provider_call_latency_seconds
+
+<ParamField path="Type" type="Histogram">
+  Measures provider API call latency in seconds
+</ParamField>
+
+<ParamField path="Labels" type="array">
+  - `provider` - Provider name (e.g., "openai", "anthropic", "ollama")
+</ParamField>
+
+**Description**: Tracks the time taken for provider API calls from request start to response completion.
+
+**Histogram buckets**: Default Prometheus buckets (.005, .01, .025, .05, .075, .1, .25, .5, .75, 1.0, 2.5, 5.0, 7.5, 10.0, +Inf)
+
+**Usage example**:
+```python
+from app.core.metrics import PROVIDER_LATENCY
+import time
+
+start = time.time()
+try:
+    response = await provider_client.call()
+finally:
+    duration = time.time() - start
+    PROVIDER_LATENCY.labels(provider="openai").observe(duration)
+```
+
+**PromQL queries**:
+```promql
+# Average latency by provider (5 min)
+rate(provider_call_latency_seconds_sum[5m]) / rate(provider_call_latency_seconds_count[5m])
+
+# 95th percentile latency
+histogram_quantile(0.95, rate(provider_call_latency_seconds_bucket[5m]))
+
+# 99th percentile latency by provider
+histogram_quantile(0.99, rate(provider_call_latency_seconds_bucket[5m]))
+```
+
+## Gateway Performance Metrics
+
+Metrics tracking overall gateway request handling and performance.
+
+### gateway_requests_total
+
+<ParamField path="Type" type="Counter">
+  Counts total requests to the gateway
+</ParamField>
+
+**Description**: Incremented for every request received by the gateway, regardless of outcome.
+
+**When incremented**: On every incoming HTTP request to chat completion endpoints.
+
+**PromQL queries**:
+```promql
+# Total requests
+gateway_requests_total
+
+# Request rate (requests per second)
+rate(gateway_requests_total[1m])
+
+# Total requests in last hour
+increase(gateway_requests_total[1h])
+```
+
+### gateway_request_latency_seconds
+
+<ParamField path="Type" type="Histogram">
+  Measures end-to-end request latency in seconds
+</ParamField>
+
+**Description**: Tracks the total time from request receipt to response completion, including cache lookups, provider calls, and processing.
+
+**Usage example**:
+```python
+from app.core.metrics import REQUEST_LATENCY
+import time
+
+start = time.time()
+try:
+    response = await process_request(request)
+finally:
+    REQUEST_LATENCY.observe(time.time() - start)
+```
+
+**PromQL queries**:
+```promql
+# Average request latency
+rate(gateway_request_latency_seconds_sum[5m]) / rate(gateway_request_latency_seconds_count[5m])
+
+# 50th percentile (median)
+histogram_quantile(0.50, rate(gateway_request_latency_seconds_bucket[5m]))
+
+# 95th percentile
+histogram_quantile(0.95, rate(gateway_request_latency_seconds_bucket[5m]))
+
+# 99th percentile
+histogram_quantile(0.99, rate(gateway_request_latency_seconds_bucket[5m]))
+```
+
+<Info>
+  Gateway latency includes cache lookup time, provider call time, and processing overhead. Compare with `provider_call_latency_seconds` to understand caching impact.
+</Info>
+
+### gateway_active_requests
+
+<ParamField path="Type" type="Gauge">
+  Number of requests currently being processed
+</ParamField>
+
+**Description**: Tracks the current number of in-flight requests being processed by the gateway.
+
+**When changed**: 
+- Incremented when request processing starts
+- Decremented when request processing completes
+
+**Usage example**:
+```python
+from app.core.metrics import ACTIVE_REQUESTS
+
+ACTIVE_REQUESTS.inc()  # Request started
+try:
+    response = await process_request()
+finally:
+    ACTIVE_REQUESTS.dec()  # Request completed
+```
+
+**PromQL queries**:
+```promql
+# Current active requests
+gateway_active_requests
+
+# Maximum concurrent requests (5 min window)
+max_over_time(gateway_active_requests[5m])
+
+# Average concurrent requests
+avg_over_time(gateway_active_requests[5m])
+```
+
+<Tip>
+  Monitor this metric to:
+  - Detect traffic spikes
+  - Identify potential bottlenecks
+  - Set autoscaling thresholds
+  - Plan capacity requirements
+</Tip>
+
+## Rate Limiter Metrics
+
+Metrics tracking the token bucket rate limiter behavior.
+
+### rate_limit_allowed_total
+
+<ParamField path="Type" type="Counter">
+  Counts requests allowed by the rate limiter
+</ParamField>
+
+**Description**: Incremented when a request passes rate limiting checks and is allowed to proceed.
+
+**When incremented**: When the token bucket has sufficient tokens for the request.
+
+**PromQL queries**:
+```promql
+# Total allowed requests
+rate_limit_allowed_total
+
+# Allowed request rate
+rate(rate_limit_allowed_total[5m])
+```
+
+### rate_limit_blocked_total
+
+<ParamField path="Type" type="Counter">
+  Counts requests blocked by the rate limiter
+</ParamField>
+
+**Description**: Incremented when a request is rejected due to rate limit exhaustion (returns 429 Too Many Requests).
+
+**When incremented**: When the token bucket is empty and cannot fulfill the request.
+
+**PromQL queries**:
+```promql
+# Total blocked requests
+rate_limit_blocked_total
+
+# Block rate
+rate(rate_limit_blocked_total[5m])
+
+# Percentage of requests blocked
+100 * rate_limit_blocked_total / (rate_limit_allowed_total + rate_limit_blocked_total)
+```
+
+<Warning>
+  A high block rate indicates:
+  - Rate limits may be too restrictive
+  - Unexpected traffic surge
+  - Potential abuse or bot traffic
+  
+  Consider adjusting rate limit configuration in `rate_limiter.py`.
+</Warning>
+
+## Querying Metrics
+
+Access metrics through multiple interfaces:
+
+<Tabs>
+  <Tab title="Prometheus UI">
+    Navigate to `http://localhost:9090/graph` and enter PromQL queries:
+    
+    ```promql
+    # Cache hit ratio over time
+    rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
+    ```
+  </Tab>
+  
+  <Tab title="Raw Endpoint">
+    Query the metrics endpoint directly:
+    
+    ```bash
+    curl http://localhost:8000/api/v1/metrics
+    ```
+  </Tab>
+  
+  <Tab title="Grafana">
+    Use Grafana dashboards with pre-configured visualizations at `http://localhost:3000`
+  </Tab>
+</Tabs>
+
+## Example PromQL Queries
+
+### Performance Monitoring
+
+```promql
+# Requests per second
+rate(gateway_requests_total[1m])
+
+# Average response time
+rate(gateway_request_latency_seconds_sum[5m]) / rate(gateway_request_latency_seconds_count[5m])
+
+# Cache effectiveness
+rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) * 100
+```
+
+### Provider Health
+
+```promql
+# Provider error rate
+rate(provider_failures_total[5m]) / rate(provider_calls_total[5m]) * 100
+
+# Slowest provider (avg latency)
+topk(3, rate(provider_call_latency_seconds_sum[5m]) / rate(provider_call_latency_seconds_count[5m]))
+```
+
+### Capacity Planning
+
+```promql
+# Peak concurrent requests
+max_over_time(gateway_active_requests[1h])
+
+# Rate limit utilization
+rate(rate_limit_blocked_total[5m]) / rate(rate_limit_allowed_total[5m]) * 100
+```
+
+## Next Steps
+
+<Card title="Setup Grafana Dashboards" icon="chart-line" href="/monitoring/grafana">
+  Learn how to visualize these metrics in Grafana with pre-built dashboards
+</Card>

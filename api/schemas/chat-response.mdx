@@ -1,0 +1,166 @@
+---
+title: "ChatResponse"
+description: "Schema for chat completion responses"
+---
+
+## Overview
+
+The `ChatResponse` schema defines the structure of successful chat completion responses from the LLM Gateway. It includes the generated content, provider information, and token usage statistics.
+
+## Schema Definition
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the chat completion response.
+</ResponseField>
+
+<ResponseField name="provider" type="string" required>
+  The LLM provider that fulfilled the request (e.g., `"openai"`, `"anthropic"`, `"cohere"`).
+</ResponseField>
+
+<ResponseField name="content" type="string" required>
+  The generated completion text from the model.
+</ResponseField>
+
+<ResponseField name="usage" type="object" required>
+  Token usage statistics for the completion.
+  
+  <Expandable title="Usage Object">
+    <ResponseField name="prompt_tokens" type="integer" required>
+      Number of tokens in the prompt (input messages).
+    </ResponseField>
+    
+    <ResponseField name="completion_tokens" type="integer" required>
+      Number of tokens in the generated completion (output).
+    </ResponseField>
+    
+    <ResponseField name="total_tokens" type="integer" required>
+      Total number of tokens used (prompt_tokens + completion_tokens).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example Response
+
+<CodeGroup>
+
+```json JSON
+{
+  "id": "chatcmpl-8f7d9e2a1b3c4d5e",
+  "provider": "openai",
+  "content": "The capital of France is Paris. It is located in the north-central part of the country.",
+  "usage": {
+    "prompt_tokens": 15,
+    "completion_tokens": 22,
+    "total_tokens": 37
+  }
+}
+```
+
+```python Python
+from llm_gateway import ChatResponse, Usage
+
+response = ChatResponse(
+    id="chatcmpl-8f7d9e2a1b3c4d5e",
+    provider="openai",
+    content="The capital of France is Paris. It is located in the north-central part of the country.",
+    usage=Usage(
+        prompt_tokens=15,
+        completion_tokens=22,
+        total_tokens=37
+    )
+)
+```
+
+```javascript JavaScript
+const response = {
+  id: "chatcmpl-8f7d9e2a1b3c4d5e",
+  provider: "openai",
+  content: "The capital of France is Paris. It is located in the north-central part of the country.",
+  usage: {
+    prompt_tokens: 15,
+    completion_tokens: 22,
+    total_tokens: 37
+  }
+};
+```
+
+</CodeGroup>
+
+## Provider Examples
+
+The `provider` field indicates which LLM backend processed your request:
+
+<CodeGroup>
+
+```json OpenAI
+{
+  "id": "chatcmpl-abc123",
+  "provider": "openai",
+  "content": "Response from OpenAI GPT model",
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 15,
+    "total_tokens": 25
+  }
+}
+```
+
+```json Anthropic
+{
+  "id": "msg-def456",
+  "provider": "anthropic",
+  "content": "Response from Anthropic Claude model",
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 15,
+    "total_tokens": 25
+  }
+}
+```
+
+```json Cohere
+{
+  "id": "gen-ghi789",
+  "provider": "cohere",
+  "content": "Response from Cohere model",
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 15,
+    "total_tokens": 25
+  }
+}
+```
+
+</CodeGroup>
+
+## Understanding Token Usage
+
+The `usage` object helps you track and optimize your API consumption:
+
+- **prompt_tokens**: Represents the size of your input (messages sent)
+- **completion_tokens**: Represents the size of the model's response
+- **total_tokens**: Combined count used for billing and rate limiting
+
+<Tip>
+Monitor `total_tokens` to estimate costs and optimize your prompts for efficiency.
+</Tip>
+
+## Nested Schemas
+
+### Usage Schema
+
+The `Usage` object is a nested schema that provides detailed token consumption metrics:
+
+```python Python
+class Usage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+```
+
+All fields are required integers representing token counts.
+
+## Related Schemas
+
+- [ChatRequest](/api/schemas/chat-request) - Request schema for chat completions
+- [Errors](/api/schemas/errors) - Error response formats
